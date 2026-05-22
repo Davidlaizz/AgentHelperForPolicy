@@ -23,6 +23,13 @@ class Settings(BaseSettings):
     upload_dir: Path = Field(default=BASE_DIR / "storage" / "uploads", alias="UPLOAD_DIR")
     parsed_dir: Path = Field(default=BASE_DIR / "storage" / "parsed", alias="PARSED_DIR")
     max_upload_file_size_mb: int = Field(default=20, alias="MAX_UPLOAD_FILE_SIZE_MB")
+    embedding_provider: str = Field(default="mock", alias="EMBEDDING_PROVIDER")
+    embedding_model: str = Field(default="mock-hash-embedding-v1", alias="EMBEDDING_MODEL")
+    embedding_dimensions: int = Field(default=1024, alias="EMBEDDING_DIMENSIONS")
+    embedding_api_url: str | None = Field(default=None, alias="EMBEDDING_API_URL")
+    embedding_api_key: str | None = Field(default=None, alias="EMBEDDING_API_KEY")
+    llamaindex_vector_table: str = Field(default="llamaindex_policy_chunks", alias="LLAMAINDEX_VECTOR_TABLE")
+    llamaindex_schema: str = Field(default="public", alias="LLAMAINDEX_SCHEMA")
 
     model_config = SettingsConfigDict(
         env_file=BASE_DIR / ".env",

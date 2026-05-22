@@ -2,7 +2,7 @@
 
 ## 1. 调整结论
 
-M4 已调整为 **LlamaIndex RAG 知识库构建**。
+M4 已调整并迁移为 **LlamaIndex RAG 知识库构建**。
 
 新的原则是：
 
@@ -11,6 +11,7 @@ M4 已调整为 **LlamaIndex RAG 知识库构建**。
 - PostgreSQL + pgvector 继续作为向量存储
 - `policy_chunks` 继续作为业务 chunk 与引用定位的主数据
 - LlamaIndex Node metadata 必须能回指 `policy_chunks.id`
+- LlamaIndex 向量索引使用独立 pgvector 表，`policy_chunks` 保持业务 chunk 与引用定位职责
 
 ## 2. 职责边界
 
@@ -91,10 +92,10 @@ M3 解析文本
 
 ### M4.0 依赖与边界
 
-- 安装 LlamaIndex 核心与 PostgreSQL vector store 依赖。
-- 建立 `services/rag/` 目录。
-- 创建 `llama_index_adapter.py`。
-- 保留当前手写 pgvector 检索代码作为迁移参考或 fallback。
+- 已安装并记录 LlamaIndex 核心与 PostgreSQL vector store 依赖。
+- 已建立 `services/rag/` 目录。
+- 已创建 `llama_index_adapter.py`。
+- 旧手写 pgvector 检索逻辑已迁移为关键词、融合排序和附件关系业务层。
 
 ### M4.1 政策语义切片
 
@@ -162,22 +163,47 @@ POST /api/rag/search
 - 统计 top-3 命中率。
 - 记录失败样例。
 
-## 7. 当前本地代码处理建议
+## 7. 迁移结果
 
-当前工作区存在一批 RAG 草稿文件，核心思路是手写 embedding、手写 pgvector 检索和手写混合排序。
+之前工作区存在一批 RAG 草稿文件，核心思路是手写 embedding、手写 pgvector 检索和手写混合排序。
 
-整理后的建议：
+本次迁移结果：
 
-- `rag_chunker.py` 的切片规则可以迁移为 `services/rag/chunker.py`
-- `embedding_provider.py` 可改造成 LlamaIndex embedding adapter 的底层 provider
-- `rag_retriever.py` 中的关键词检索、融合排序和附件关系逻辑可拆入：
+- `rag_chunker.py` 的切片规则已迁移为 `services/rag/chunker.py`
+- `embedding_provider.py` 已迁移为 `services/rag/embedding.py`
+- 新增 `services/rag/llama_index_adapter.py`，作为唯一直接调用 LlamaIndex 的入口
+- `rag_retriever.py` 中的关键词检索、融合排序和附件关系逻辑已拆入：
   - `metadata_filter.py`
   - `relation_resolver.py`
   - `fusion.py`
-- 向量检索入口应迁移到 `llama_index_adapter.py`
-- 业务 API 可以继续保持 `/api/rag/*`
+- 业务 API 保持 `/api/rag/*`
 
-## 8. 参考资料
+## 8. 前置检查修正
+
+本次继续 M4 前检查并修正了以下问题：
+
+- `main.py` 已引用未提交 RAG 草稿路由，容易造成后端行为依赖半成品代码。本次已完成迁移，路由现在指向 LlamaIndex 版服务。
+- M2 中 `policy_chunks.embedding` 为 `vector(1024)`，不适合作为长期 LlamaIndex 向量索引主表。本次设计改为 LlamaIndex 独立 pgvector 表，`policy_chunks` 只负责业务 chunk 与引用定位。
+- LlamaIndex `PGVectorStore` 在当前版本中使用 `connection_string` 会生成异常 async URL。本次改为显式传入 host、port、database、user、password。
+- 前端使用 `next/font/google` 会在构建时访问 Google Fonts，网络不稳定时导致 build 失败。本次改为系统字体栈，构建不再依赖外网字体。
+
+## 9. 当前验证结果
+
+已完成：
+
+- `python -m compileall app`
+- 后端路由导入
+- `python app/db/m4_smoke_test.py`
+- `POST /api/rag/index/rebuild`
+- `GET /api/rag/search`
+
+当前冒烟结果：
+
+- 索引文件数：3
+- LlamaIndex 知识库 chunk 数：55
+- 检索已返回融合分数、metadata、chunk_id 和引用定位字段
+
+## 10. 参考资料
 
 - LlamaIndex 官方文档：https://docs.llamaindex.ai/
 - LlamaIndex PostgreSQL vector store 示例：https://docs.llamaindex.ai/en/stable/examples/vector_stores/postgres/
