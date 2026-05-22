@@ -5,7 +5,8 @@
 当前仓库按照《智策通_细分开发任务清单.md》推进，已完成：
 
 - M0：需求冻结与资料准备
-- M1：基础工程搭建（进行中）
+- M1：基础工程搭建
+- M2：数据库与数据模型
 
 ## 目录结构
 
@@ -36,4 +37,3 @@ AgentHelper/
 - [frontend/.env.example](D:\woskspace\AgentHelper\frontend\.env.example)
 - [backend/.env.example](D:\woskspace\AgentHelper\backend\.env.example)
 - [docs/m1-vm-database-setup.md](D:\woskspace\AgentHelper\docs\m1-vm-database-setup.md)
-
