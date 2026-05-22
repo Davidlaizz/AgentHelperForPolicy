@@ -1,0 +1,13 @@
+services:
+  postgres:
+    image: docker.m.daocloud.io/pgvector/pgvector:pg16
+    container_name: zhicetong-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: zhicetong
+      POSTGRES_USER: zhicetong
+      POSTGRES_PASSWORD: "Zhct_pg_2026"
+    ports:
+      - "5432:5432"
+    volumes:
+      - /opt/zhicetong/postgres-data:/var/lib/postgresql/data
