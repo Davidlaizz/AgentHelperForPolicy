@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import urllib.error
 import urllib.request
 from abc import ABC, abstractmethod
 
@@ -52,7 +53,11 @@ class HttpLLMProvider(LLMProvider):
             },
             ensure_ascii=False,
         ).encode("utf-8")
-        headers = {"Content-Type": "application/json"}
+        headers = {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "User-Agent": "AgentHelper/0.1",
+        }
         if settings.llm_api_key:
             headers["Authorization"] = f"Bearer {settings.llm_api_key}"
 
@@ -62,8 +67,11 @@ class HttpLLMProvider(LLMProvider):
             headers=headers,
             method="POST",
         )
-        with urllib.request.urlopen(request, timeout=90) as response:
-            body = json.loads(response.read().decode("utf-8"))
+        try:
+            with urllib.request.urlopen(request, timeout=90) as response:
+                body = json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as error:
+            raise RuntimeError(format_llm_http_error(error)) from error
 
         if "choices" in body:
             return body["choices"][0]["message"]["content"]
@@ -80,6 +88,24 @@ def get_llm_provider() -> LLMProvider:
     if settings.llm_provider == "http":
         return HttpLLMProvider()
     raise RuntimeError(f"不支持的 LLM provider：{settings.llm_provider}")
+
+
+def format_llm_http_error(error: urllib.error.HTTPError) -> str:
+    raw_body = error.read().decode("utf-8", errors="replace")
+    message = raw_body.strip()
+    code_text = ""
+
+    try:
+        body = json.loads(raw_body)
+    except json.JSONDecodeError:
+        body = {}
+
+    if isinstance(body, dict):
+        message = str(body.get("message") or body.get("error") or message)
+        if body.get("code") is not None:
+            code_text = f"，code {body['code']}"
+
+    return f"LLM 服务调用失败（HTTP {error.code}{code_text}）：{message}"
 
 
 def citation_location(item: dict) -> str:
