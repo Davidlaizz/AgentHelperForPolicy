@@ -20,6 +20,9 @@ class Settings(BaseSettings):
     postgres_password: str = Field(default="change_me", alias="POSTGRES_PASSWORD")
 
     database_url: str | None = Field(default=None, alias="DATABASE_URL")
+    upload_dir: Path = Field(default=BASE_DIR / "storage" / "uploads", alias="UPLOAD_DIR")
+    parsed_dir: Path = Field(default=BASE_DIR / "storage" / "parsed", alias="PARSED_DIR")
+    max_upload_file_size_mb: int = Field(default=20, alias="MAX_UPLOAD_FILE_SIZE_MB")
 
     model_config = SettingsConfigDict(
         env_file=BASE_DIR / ".env",
@@ -38,6 +41,9 @@ class Settings(BaseSettings):
             f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
         )
 
+    @property
+    def max_upload_file_size_bytes(self) -> int:
+        return self.max_upload_file_size_mb * 1024 * 1024
+
 
 settings = Settings()
-

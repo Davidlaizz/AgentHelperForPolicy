@@ -7,6 +7,7 @@
 - M0：需求冻结与资料准备
 - M1：基础工程搭建
 - M2：数据库与数据模型
+- M3：政策文件上传与解析
 
 ## 目录结构
 
@@ -24,6 +25,7 @@ AgentHelper/
 - 前端：Next.js + TypeScript + Tailwind CSS + shadcn/ui
 - 后端：FastAPI + SQLAlchemy + Uvicorn
 - 数据库：PostgreSQL + pgvector
+- 文件解析：PyMuPDF + python-docx
 
 ## 运行说明
 

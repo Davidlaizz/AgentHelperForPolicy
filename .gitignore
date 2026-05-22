@@ -9,6 +9,10 @@ backend/**/*.pyc
 backend/**/*.pyo
 backend/.env
 backend/wheels/
+backend/storage/uploads/*
+backend/storage/parsed/*
+!backend/storage/uploads/.gitkeep
+!backend/storage/parsed/.gitkeep
 scripts/logs/
 scripts/ssh-tools/node_modules/
 *.pyc

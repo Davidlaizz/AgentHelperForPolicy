@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Index, Integer, String, Text, func
+from sqlalchemy import BigInteger, Boolean, Date, DateTime, ForeignKey, Index, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -18,6 +18,8 @@ class PolicyDocument(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     file_name: Mapped[str] = mapped_column(String(255), nullable=False)
     file_path: Mapped[str] = mapped_column(String(500), nullable=False)
     file_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    file_size: Mapped[int | None] = mapped_column(BigInteger)
+    content_sha256: Mapped[str | None] = mapped_column(String(64), index=True)
     policy_level: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
     policy_category: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     issuing_department: Mapped[str | None] = mapped_column(String(255))
@@ -28,6 +30,9 @@ class PolicyDocument(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     effective_to: Mapped[date | None] = mapped_column(Date, index=True)
     version: Mapped[str | None] = mapped_column(String(100))
     parse_status: Mapped[str] = mapped_column(String(50), default="uploaded", nullable=False, index=True)
+    parse_error: Mapped[str | None] = mapped_column(Text)
+    parsed_text_path: Mapped[str | None] = mapped_column(String(500))
+    parsed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     source_type: Mapped[str | None] = mapped_column(String(50))
     source_url: Mapped[str | None] = mapped_column(String(500))
     authority_rank: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
