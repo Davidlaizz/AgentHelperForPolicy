@@ -34,6 +34,9 @@ class Settings(BaseSettings):
     llm_model: str = Field(default="mock-policy-qa-v1", alias="LLM_MODEL")
     llm_api_url: str | None = Field(default=None, alias="LLM_API_URL")
     llm_api_key: str | None = Field(default=None, alias="LLM_API_KEY")
+    llm_max_tokens: int | None = Field(default=None, alias="LLM_MAX_TOKENS")
+    llm_timeout_seconds: int = Field(default=90, alias="LLM_TIMEOUT_SECONDS")
+    llm_thinking_type: str | None = Field(default=None, alias="LLM_THINKING_TYPE")
 
     model_config = SettingsConfigDict(
         env_file=BASE_DIR / ".env",

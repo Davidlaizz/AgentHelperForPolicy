@@ -42,17 +42,20 @@ class HttpLLMProvider(LLMProvider):
         if not settings.llm_api_url:
             raise RuntimeError("未配置 LLM_API_URL")
 
-        payload = json.dumps(
-            {
-                "model": settings.llm_model,
-                "messages": [
-                    {"role": "system", "content": "你是高校政策智能问答助手，只能基于给定政策片段回答。"},
-                    {"role": "user", "content": prompt},
-                ],
-                "temperature": 0.2,
-            },
-            ensure_ascii=False,
-        ).encode("utf-8")
+        payload_body = {
+            "model": settings.llm_model,
+            "messages": [
+                {"role": "system", "content": "你是高校政策智能问答助手，只能基于给定政策片段回答。"},
+                {"role": "user", "content": prompt},
+            ],
+            "temperature": 0.2,
+        }
+        if settings.llm_max_tokens:
+            payload_body["max_tokens"] = settings.llm_max_tokens
+        if settings.llm_thinking_type:
+            payload_body["thinking"] = {"type": settings.llm_thinking_type}
+
+        payload = json.dumps(payload_body, ensure_ascii=False).encode("utf-8")
         headers = {
             "Accept": "application/json",
             "Content-Type": "application/json",
@@ -68,10 +71,14 @@ class HttpLLMProvider(LLMProvider):
             method="POST",
         )
         try:
-            with urllib.request.urlopen(request, timeout=90) as response:
+            with urllib.request.urlopen(request, timeout=settings.llm_timeout_seconds) as response:
                 body = json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as error:
             raise RuntimeError(format_llm_http_error(error)) from error
+        except TimeoutError as error:
+            raise RuntimeError(f"LLM 服务调用超时（超过 {settings.llm_timeout_seconds} 秒）") from error
+        except urllib.error.URLError as error:
+            raise RuntimeError(f"LLM 服务调用失败：{error.reason}") from error
 
         if "choices" in body:
             return body["choices"][0]["message"]["content"]

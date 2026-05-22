@@ -58,7 +58,27 @@ LLM_PROVIDER=mock
 LLM_MODEL=mock-policy-qa-v1
 LLM_API_URL=
 LLM_API_KEY=
+LLM_MAX_TOKENS=
+LLM_TIMEOUT_SECONDS=90
+LLM_THINKING_TYPE=
 ```
+
+智谱 GLM-4.7 已通过真实 `/api/chat` 链路验证，可作为当前本地 chat 模型：
+
+```text
+LLM_PROVIDER=http
+LLM_MODEL=glm-4.7
+LLM_API_URL=https://open.bigmodel.cn/api/paas/v4/chat/completions
+LLM_API_KEY=your-zhipu-key
+LLM_MAX_TOKENS=1200
+LLM_TIMEOUT_SECONDS=180
+LLM_THINKING_TYPE=disabled
+```
+
+说明：
+- `LLM_THINKING_TYPE=disabled` 用于关闭 GLM-4.7 默认 Thinking，降低 RAG 问答延迟
+- `LLM_MAX_TOKENS` 控制回答长度
+- `LLM_TIMEOUT_SECONDS` 控制外部模型调用超时时间
 
 ## 4. Prompt 约束
 
