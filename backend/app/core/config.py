@@ -30,6 +30,10 @@ class Settings(BaseSettings):
     embedding_api_key: str | None = Field(default=None, alias="EMBEDDING_API_KEY")
     llamaindex_vector_table: str = Field(default="llamaindex_policy_chunks", alias="LLAMAINDEX_VECTOR_TABLE")
     llamaindex_schema: str = Field(default="public", alias="LLAMAINDEX_SCHEMA")
+    llm_provider: str = Field(default="mock", alias="LLM_PROVIDER")
+    llm_model: str = Field(default="mock-policy-qa-v1", alias="LLM_MODEL")
+    llm_api_url: str | None = Field(default=None, alias="LLM_API_URL")
+    llm_api_key: str | None = Field(default=None, alias="LLM_API_KEY")
 
     model_config = SettingsConfigDict(
         env_file=BASE_DIR / ".env",

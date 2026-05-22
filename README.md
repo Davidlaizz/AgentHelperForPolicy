@@ -9,6 +9,7 @@
 - M2：数据库与数据模型
 - M3：政策文件上传与解析
 - M4：LlamaIndex RAG 知识库构建
+- M5：政策智能问答
 
 ## 目录结构
 
@@ -28,6 +29,7 @@ AgentHelper/
 - 数据库：PostgreSQL + pgvector
 - 文件解析：PyMuPDF + python-docx
 - RAG：LlamaIndex + PostgreSQL pgvector
+- 问答：统一 LLM Provider + RAG 引用
 
 ## 运行说明
 
