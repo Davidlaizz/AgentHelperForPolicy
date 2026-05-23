@@ -1,7 +1,7 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
-import { Bot, FileText, Loader2, Send, UserRound } from "lucide-react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Bot, FileText, Loader2, MessageSquareText, Send, UserRound } from "lucide-react";
 
 import { SectionCard } from "@/components/section-card";
 import { Button } from "@/components/ui/button";
@@ -87,10 +87,11 @@ export default function ChatPage() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [loading, setLoading] = useState(false);
+  const autoAsked = useRef(false);
 
   const canSubmit = useMemo(() => question.trim().length > 0 && !loading, [question, loading]);
 
-  async function ask(nextQuestion: string) {
+  const ask = useCallback(async (nextQuestion: string) => {
     const trimmed = nextQuestion.trim();
     if (!trimmed) {
       return;
@@ -135,7 +136,7 @@ export default function ChatPage() {
     } finally {
       setLoading(false);
     }
-  }
+  }, [sessionId]);
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -144,26 +145,65 @@ export default function ChatPage() {
     }
   }
 
+  useEffect(() => {
+    if (autoAsked.current) {
+      return;
+    }
+    const params = new URLSearchParams(window.location.search);
+    const initialQuestion = params.get("question");
+    if (initialQuestion) {
+      autoAsked.current = true;
+      void ask(initialQuestion);
+    }
+  }, [ask]);
+
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-6 px-6 py-6">
+    <div className="mx-auto grid w-full max-w-7xl flex-1 gap-6 px-4 py-6 lg:grid-cols-[280px_1fr] lg:px-6">
+      <aside className="space-y-4">
+        <SectionCard title="会话脉络" description="保留本轮咨询问题，便于演示连续追问。">
+          <div className="space-y-2">
+            {turns.length === 0 ? (
+              <p className="text-sm leading-6 text-muted-foreground">还没有开始咨询。</p>
+            ) : null}
+            {turns.map((turn, index) => (
+              <div key={turn.id} className="rounded-md border border-border bg-background p-3">
+                <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
+                  <MessageSquareText className="size-3.5" />
+                  <span>第 {index + 1} 轮</span>
+                </div>
+                <p className="line-clamp-3 text-sm leading-6 text-foreground">{turn.question}</p>
+              </div>
+            ))}
+          </div>
+        </SectionCard>
+
+        <SectionCard title="演示脚本" description="点击问题即可开始稳定链路。">
+          <div className="space-y-2">
+            {starterQuestions.map((item) => (
+              <Button
+                key={item}
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={loading}
+                className="w-full justify-start whitespace-normal text-left"
+                onClick={() => ask(item)}
+              >
+                {item}
+              </Button>
+            ))}
+          </div>
+        </SectionCard>
+      </aside>
+
+      <main className="flex min-w-0 flex-col gap-6">
       <SectionCard
         title="智能问答"
         description="基于政策知识库回答问题，并展示政策依据、AI 推断和引用出处。"
       >
-        <div className="flex flex-wrap gap-2">
-          {starterQuestions.map((item) => (
-            <Button
-              key={item}
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled={loading}
-              onClick={() => ask(item)}
-            >
-              {item}
-            </Button>
-          ))}
-        </div>
+        <p className="text-sm leading-6 text-muted-foreground">
+          适合自由问政策，也适合进入多轮资格判断。回答会带出处、Agent 状态和风险提示。
+        </p>
       </SectionCard>
 
       <section className="flex min-h-[520px] flex-col rounded-lg border border-border bg-card">
@@ -224,6 +264,7 @@ export default function ChatPage() {
           </div>
         </form>
       </section>
+      </main>
     </div>
   );
 }
@@ -308,6 +349,17 @@ function AgentPanel({ agent }: { agent: AgentResponse }) {
         <div className="mb-3">
           <h3 className="mb-2 text-sm font-semibold text-foreground">资格判断</h3>
           <p className="text-sm leading-6 text-foreground">{agent.eligibility.result_summary}</p>
+        </div>
+      ) : null}
+
+      {agent.risk.warnings.length > 0 ? (
+        <div className="mb-3">
+          <h3 className="mb-2 text-sm font-semibold text-foreground">风险提示</h3>
+          <ul className="space-y-1 text-sm leading-6 text-foreground">
+            {agent.risk.warnings.map((item) => (
+              <li key={item}>- {item}</li>
+            ))}
+          </ul>
         </div>
       ) : null}
 

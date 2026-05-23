@@ -1,4 +1,7 @@
+"use client";
+
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { BellRing, FolderKanban, LayoutDashboard, Library, SearchCheck, ShieldCheck } from "lucide-react";
 
 const navItems = [
@@ -11,11 +14,13 @@ const navItems = [
 ];
 
 export function AppNav() {
+  const pathname = usePathname();
+
   return (
-    <header className="border-b border-border bg-background">
-      <div className="mx-auto flex w-full max-w-7xl items-center justify-between gap-6 px-6 py-4">
+    <header className="sticky top-0 z-20 border-b border-border bg-background/95 backdrop-blur">
+      <div className="mx-auto flex w-full max-w-7xl flex-col gap-3 px-4 py-3 md:flex-row md:items-center md:justify-between md:px-6">
         <div className="flex min-w-0 items-center gap-4">
-          <div className="flex size-10 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+          <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
             智
           </div>
           <div className="min-w-0">
@@ -25,12 +30,16 @@ export function AppNav() {
             </p>
           </div>
         </div>
-        <nav className="hidden items-center gap-2 md:flex">
+        <nav className="flex min-w-0 gap-1 overflow-x-auto pb-1 md:items-center md:overflow-visible md:pb-0">
           {navItems.map(({ href, label, icon: Icon }) => (
             <Link
               key={href}
               href={href}
-              className="flex h-9 items-center gap-2 rounded-md px-3 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              className={`flex h-9 shrink-0 items-center gap-2 rounded-md px-3 text-sm transition-colors ${
+                pathname === href
+                  ? "bg-primary text-primary-foreground"
+                  : "text-muted-foreground hover:bg-muted hover:text-foreground"
+              }`}
             >
               <Icon className="size-4" />
               <span>{label}</span>
@@ -41,4 +50,3 @@ export function AppNav() {
     </header>
   );
 }
-
