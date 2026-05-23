@@ -14,6 +14,7 @@ M7 已完成管理后台与知识库核查的最小闭环。
 - 条款关键词搜索
 - 标准答案创建、列表、停用
 - 热门问题看板
+- 热门问题乱码过滤，避免编码异常或纯问号测试数据进入榜单
 - 基础数据看板
 
 ## 2. 后端接口
@@ -43,6 +44,11 @@ POST /api/management/standard-answers
 PATCH /api/management/standard-answers/{answer_id}
 DELETE /api/management/standard-answers/{answer_id}
 ```
+
+说明：
+
+- 热门问题写入前会过滤明显乱码、纯问号或缺少有效字符的问题
+- 热门问题列表接口会再次过滤历史脏数据，保证看板只展示可读问题
 
 ## 3. 前端页面
 

@@ -27,6 +27,7 @@ from app.schemas.management import (
     StandardAnswerResponse,
     StandardAnswerUpdateRequest,
 )
+from app.services.policy_qa import is_valid_hot_question
 
 router = APIRouter(prefix="/management", tags=["management"])
 
@@ -83,8 +84,9 @@ def list_hot_questions(
     rows = db.execute(
         select(HotQuestion)
         .order_by(HotQuestion.hit_count.desc(), HotQuestion.last_asked_at.desc())
-        .limit(limit)
+        .limit(limit * 2)
     ).scalars()
+    visible_rows = [item for item in rows if is_valid_hot_question(item.question_text)][:limit]
     return [
         HotQuestionResponse(
             id=str(item.id),
@@ -96,7 +98,7 @@ def list_hot_questions(
             created_at=item.created_at,
             updated_at=item.updated_at,
         )
-        for item in rows
+        for item in visible_rows
     ]
 
 

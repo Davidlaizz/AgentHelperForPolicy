@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import re
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -214,6 +215,9 @@ def create_citations(
 
 
 def update_hot_question(db: Session, question: str, policy_category: str | None) -> None:
+    if not is_valid_hot_question(question):
+        return
+
     normalized = normalize_question(question)
     hot_question = db.execute(
         select(HotQuestion).where(HotQuestion.normalized_question == normalized)
@@ -236,3 +240,15 @@ def update_hot_question(db: Session, question: str, policy_category: str | None)
 
 def normalize_question(question: str) -> str:
     return "".join(question.lower().split())[:500]
+
+
+def is_valid_hot_question(question: str) -> bool:
+    normalized = "".join(question.split())
+    if len(normalized) < 2:
+        return False
+
+    question_marks = normalized.count("?") + normalized.count("？")
+    if question_marks and question_marks / len(normalized) > 0.4:
+        return False
+
+    return bool(re.search(r"[\u4e00-\u9fffA-Za-z0-9]", normalized))
