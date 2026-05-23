@@ -1,10 +1,22 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { FileText, RefreshCw, RotateCcw, Upload } from "lucide-react";
+import type { ReactNode } from "react";
+import {
+  BarChart3,
+  BookOpenCheck,
+  FileText,
+  MessageSquareText,
+  RefreshCw,
+  RotateCcw,
+  Save,
+  ShieldAlert,
+  Trash2,
+  Upload,
+} from "lucide-react";
 
-import { Button } from "@/components/ui/button";
 import { SectionCard } from "@/components/section-card";
+import { Button } from "@/components/ui/button";
 
 type PolicyDocument = {
   id: string;
@@ -27,7 +39,42 @@ type PolicyDocument = {
   parent_document_id: string | null;
   attachment_title: string | null;
   chunk_count: number;
+  is_active: boolean;
   created_at: string;
+};
+
+type Dashboard = {
+  document_count: number;
+  active_document_count: number;
+  parsed_document_count: number;
+  chunk_count: number;
+  today_question_count: number;
+  hot_question_count: number;
+  standard_answer_count: number;
+  high_risk_answer_count: number;
+  service_case_count: number;
+  memory_item_count: number;
+  top_policy_categories: { name: string; count: number }[];
+  top_case_types: { name: string; count: number }[];
+};
+
+type HotQuestion = {
+  id: string;
+  question_text: string;
+  policy_category: string | null;
+  hit_count: number;
+  last_asked_at: string;
+};
+
+type StandardAnswer = {
+  id: string;
+  title: string;
+  policy_category: string | null;
+  question_keywords: string[] | Record<string, unknown> | null;
+  applicable_scope: string | null;
+  answer_content: string;
+  status: string;
+  updated_at: string;
 };
 
 const apiBaseUrl =
@@ -51,6 +98,9 @@ const statusClassName: Record<PolicyDocument["parse_status"], string> = {
 
 export default function AdminPage() {
   const [documents, setDocuments] = useState<PolicyDocument[]>([]);
+  const [dashboard, setDashboard] = useState<Dashboard | null>(null);
+  const [hotQuestions, setHotQuestions] = useState<HotQuestion[]>([]);
+  const [standardAnswers, setStandardAnswers] = useState<StandardAnswer[]>([]);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [documentRole, setDocumentRole] = useState<"main" | "attachment">("main");
   const [parentDocumentId, setParentDocumentId] = useState("");
@@ -59,50 +109,51 @@ export default function AdminPage() {
   const [message, setMessage] = useState("");
 
   const mainDocuments = useMemo(
-    () => documents.filter((document) => !document.is_attachment),
+    () => documents.filter((document) => !document.is_attachment && document.is_active),
     [documents],
   );
 
-  async function loadDocuments() {
-    const response = await fetch(`${apiBaseUrl}/api/documents`, {
-      cache: "no-store",
-    });
-    if (!response.ok) {
-      throw new Error("文件列表加载失败");
-    }
-    setDocuments(await response.json());
+  async function loadAll() {
+    const [documentResponse, dashboardResponse, hotResponse, answerResponse] =
+      await Promise.all([
+        fetch(`${apiBaseUrl}/api/documents`, { cache: "no-store" }),
+        fetch(`${apiBaseUrl}/api/management/dashboard`, { cache: "no-store" }),
+        fetch(`${apiBaseUrl}/api/management/hot-questions?limit=8`, { cache: "no-store" }),
+        fetch(`${apiBaseUrl}/api/management/standard-answers`, { cache: "no-store" }),
+      ]);
+
+    if (!documentResponse.ok) throw new Error("文件列表加载失败");
+    if (!dashboardResponse.ok) throw new Error("看板指标加载失败");
+    if (!hotResponse.ok) throw new Error("热门问题加载失败");
+    if (!answerResponse.ok) throw new Error("标准答案加载失败");
+
+    setDocuments(await documentResponse.json());
+    setDashboard(await dashboardResponse.json());
+    setHotQuestions(await hotResponse.json());
+    setStandardAnswers(await answerResponse.json());
   }
 
   useEffect(() => {
     let cancelled = false;
 
-    async function loadInitialDocuments() {
+    async function loadInitial() {
       try {
-        const response = await fetch(`${apiBaseUrl}/api/documents`, {
-          cache: "no-store",
-        });
-        if (!response.ok) {
-          throw new Error("文件列表加载失败");
-        }
-        const payload = await response.json();
-        if (!cancelled) {
-          setDocuments(payload);
-        }
+        await loadAll();
       } catch (error) {
         if (!cancelled) {
-          setMessage(error instanceof Error ? error.message : "文件列表加载失败");
+          setMessage(error instanceof Error ? error.message : "后台数据加载失败");
         }
       }
     }
 
-    void loadInitialDocuments();
+    void loadInitial();
 
     return () => {
       cancelled = true;
     };
   }, []);
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleUpload(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!selectedFile) {
       setMessage("请选择 PDF 或 DOCX 文件");
@@ -137,7 +188,7 @@ export default function AdminPage() {
       setParentDocumentId("");
       setAutoParse(true);
       setMessage(`已上传：${payload.title}`);
-      await loadDocuments();
+      await loadAll();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "上传失败");
     } finally {
@@ -157,7 +208,7 @@ export default function AdminPage() {
         throw new Error(payload.detail ?? "重新解析失败");
       }
       setMessage(`已重新解析：${payload.title}`);
-      await loadDocuments();
+      await loadAll();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "重新解析失败");
     } finally {
@@ -165,10 +216,129 @@ export default function AdminPage() {
     }
   }
 
+  async function saveDocumentMetadata(document: PolicyDocument, formData: FormData) {
+    setLoading(true);
+    setMessage("");
+    try {
+      const payload = formObject(formData);
+      const response = await fetch(`${apiBaseUrl}/api/documents/${document.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const body = await response.json();
+      if (!response.ok) {
+        throw new Error(body.detail ?? "metadata 保存失败");
+      }
+      setMessage(`已保存：${body.title}`);
+      await loadAll();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "metadata 保存失败");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function disableDocument(document: PolicyDocument) {
+    setLoading(true);
+    setMessage("");
+    try {
+      const response = await fetch(`${apiBaseUrl}/api/documents/${document.id}`, {
+        method: "DELETE",
+      });
+      const body = await response.json();
+      if (!response.ok) {
+        throw new Error(body.detail ?? "禁用失败");
+      }
+      setMessage(`已禁用：${body.title}`);
+      await loadAll();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "禁用失败");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function createStandardAnswer(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const formData = new FormData(form);
+    const keywords = String(formData.get("question_keywords") ?? "")
+      .split(/[，,\s]+/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+
+    setLoading(true);
+    setMessage("");
+    try {
+      const response = await fetch(`${apiBaseUrl}/api/management/standard-answers`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: formData.get("title"),
+          policy_category: emptyToNull(formData.get("policy_category")),
+          question_keywords: keywords,
+          applicable_scope: emptyToNull(formData.get("applicable_scope")),
+          answer_content: formData.get("answer_content"),
+          status: "active",
+        }),
+      });
+      const body = await response.json();
+      if (!response.ok) {
+        throw new Error(body.detail ?? "标准答案保存失败");
+      }
+      form.reset();
+      setMessage(`已创建标准答案：${body.title}`);
+      await loadAll();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "标准答案保存失败");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function disableStandardAnswer(answer: StandardAnswer) {
+    setLoading(true);
+    setMessage("");
+    try {
+      const response = await fetch(`${apiBaseUrl}/api/management/standard-answers/${answer.id}`, {
+        method: "DELETE",
+      });
+      const body = await response.json();
+      if (!response.ok) {
+        throw new Error(body.detail ?? "标准答案停用失败");
+      }
+      setMessage(`已停用标准答案：${body.title}`);
+      await loadAll();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "标准答案停用失败");
+    } finally {
+      setLoading(false);
+    }
+  }
+
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-1 flex-col gap-6 px-6 py-6">
-      <SectionCard title="管理后台" description="政策文件上传、metadata 录入与解析状态管理。">
-        <form onSubmit={handleSubmit} className="grid gap-4 lg:grid-cols-[1fr_1fr]">
+      <SectionCard title="管理后台" description="政策知识库、运营指标、热门问题和标准答案维护。">
+        <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
+          <Metric icon={<FileText className="size-4" />} label="政策文件" value={dashboard?.document_count ?? 0} />
+          <Metric icon={<BookOpenCheck className="size-4" />} label="已解析" value={dashboard?.parsed_document_count ?? 0} />
+          <Metric icon={<BarChart3 className="size-4" />} label="知识切片" value={dashboard?.chunk_count ?? 0} />
+          <Metric icon={<MessageSquareText className="size-4" />} label="今日问答" value={dashboard?.today_question_count ?? 0} />
+          <Metric icon={<ShieldAlert className="size-4" />} label="高风险" value={dashboard?.high_risk_answer_count ?? 0} />
+          <Metric icon={<BookOpenCheck className="size-4" />} label="标准答案" value={dashboard?.standard_answer_count ?? 0} />
+        </div>
+        <div className="mt-4 flex flex-wrap items-center gap-3">
+          <Button type="button" variant="outline" disabled={loading} onClick={() => loadAll()}>
+            <RefreshCw className="size-4" />
+            刷新后台数据
+          </Button>
+          {message ? <p className="text-sm text-muted-foreground">{message}</p> : null}
+        </div>
+      </SectionCard>
+
+      <SectionCard title="政策文件上传" description="上传政策主文件或附件，并录入可参与检索过滤的 metadata。">
+        <form onSubmit={handleUpload} className="grid gap-4 lg:grid-cols-[1fr_1fr]">
           <div className="space-y-4">
             <label className="block space-y-2 text-sm font-medium text-foreground">
               <span>政策文件</span>
@@ -188,7 +358,6 @@ export default function AdminPage() {
               <Field name="issuing_department" label="发布部门" />
               <Field name="applicable_scope" label="适用范围" />
               <Field name="college" label="学院" />
-              <Field name="version" label="版本" />
             </div>
           </div>
 
@@ -198,22 +367,17 @@ export default function AdminPage() {
               <Field name="effective_from" label="生效时间" type="date" />
               <Field name="effective_to" label="失效时间" type="date" />
             </div>
-
+            <Field name="version" label="版本" />
             <div className="grid gap-4 md:grid-cols-2">
-              <label className="block space-y-2 text-sm font-medium text-foreground">
-                <span>文件类型</span>
-                <select
-                  value={documentRole}
-                  onChange={(event) =>
-                    setDocumentRole(event.target.value as "main" | "attachment")
-                  }
-                  className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-                >
-                  <option value="main">主文件</option>
-                  <option value="attachment">附件</option>
-                </select>
-              </label>
-
+              <SelectField
+                label="文件类型"
+                value={documentRole}
+                onChange={(value) => setDocumentRole(value as "main" | "attachment")}
+                options={[
+                  { label: "主文件", value: "main" },
+                  { label: "附件", value: "attachment" },
+                ]}
+              />
               <label className="block space-y-2 text-sm font-medium text-foreground">
                 <span>所属主文件</span>
                 <select
@@ -233,11 +397,9 @@ export default function AdminPage() {
                 </select>
               </label>
             </div>
-
             {documentRole === "attachment" ? (
               <Field name="attachment_title" label="附件标题" placeholder="默认使用政策标题" />
             ) : null}
-
             <label className="flex items-center gap-2 text-sm text-foreground">
               <input
                 name="auto_parse"
@@ -248,88 +410,37 @@ export default function AdminPage() {
               />
               <span>上传后自动解析</span>
             </label>
-
-            <div className="flex flex-wrap items-center gap-3">
-              <Button type="submit" disabled={loading} size="lg">
-                <Upload className="size-4" />
-                上传
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                disabled={loading}
-                onClick={() => loadDocuments()}
-                size="lg"
-              >
-                <RefreshCw className="size-4" />
-                刷新
-              </Button>
-              {message ? <p className="text-sm text-muted-foreground">{message}</p> : null}
-            </div>
+            <Button type="submit" disabled={loading} size="lg">
+              <Upload className="size-4" />
+              上传
+            </Button>
           </div>
         </form>
       </SectionCard>
 
-      <SectionCard title="政策文件" description="已上传文件、附件关系与解析结果。">
+      <SectionCard title="政策文件管理" description="查看解析状态、chunk 数量，并维护文件 metadata。">
         <div className="overflow-hidden rounded-lg border border-border">
           <table className="w-full table-fixed border-collapse text-left text-sm">
             <thead className="bg-muted/70 text-xs text-muted-foreground">
               <tr>
                 <th className="w-[30%] px-3 py-2 font-medium">文件</th>
-                <th className="w-[14%] px-3 py-2 font-medium">metadata</th>
-                <th className="w-[12%] px-3 py-2 font-medium">关系</th>
+                <th className="w-[15%] px-3 py-2 font-medium">分类</th>
                 <th className="w-[12%] px-3 py-2 font-medium">状态</th>
-                <th className="w-[12%] px-3 py-2 font-medium">段落</th>
+                <th className="w-[10%] px-3 py-2 font-medium">切片</th>
+                <th className="w-[13%] px-3 py-2 font-medium">启用</th>
                 <th className="w-[20%] px-3 py-2 font-medium">操作</th>
               </tr>
             </thead>
             <tbody>
               {documents.map((document) => (
-                <tr key={document.id} className="border-t border-border align-top">
-                  <td className="px-3 py-3">
-                    <div className="flex min-w-0 gap-2">
-                      <FileText className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-                      <div className="min-w-0">
-                        <p className="truncate font-medium text-foreground">{document.title}</p>
-                        <p className="truncate text-xs text-muted-foreground">
-                          {document.file_name}
-                        </p>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-3 py-3 text-xs text-muted-foreground">
-                    <p>{document.policy_level}</p>
-                    <p>{document.policy_category}</p>
-                  </td>
-                  <td className="px-3 py-3 text-xs text-muted-foreground">
-                    {document.is_attachment ? "附件" : "主文件"}
-                  </td>
-                  <td className="px-3 py-3">
-                    <span
-                      className={`inline-flex rounded-md border px-2 py-1 text-xs ${statusClassName[document.parse_status]}`}
-                    >
-                      {statusLabel[document.parse_status]}
-                    </span>
-                    {document.parse_error ? (
-                      <p className="mt-1 line-clamp-2 text-xs text-red-600">
-                        {document.parse_error}
-                      </p>
-                    ) : null}
-                  </td>
-                  <td className="px-3 py-3 text-sm text-foreground">{document.chunk_count}</td>
-                  <td className="px-3 py-3">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      disabled={loading}
-                      onClick={() => retryParse(document.id)}
-                    >
-                      <RotateCcw className="size-3.5" />
-                      重新解析
-                    </Button>
-                  </td>
-                </tr>
+                <DocumentRow
+                  key={document.id}
+                  document={document}
+                  loading={loading}
+                  onRetry={() => retryParse(document.id)}
+                  onSave={(formData) => saveDocumentMetadata(document, formData)}
+                  onDisable={() => disableDocument(document)}
+                />
               ))}
               {documents.length === 0 ? (
                 <tr>
@@ -342,6 +453,194 @@ export default function AdminPage() {
           </table>
         </div>
       </SectionCard>
+
+      <div className="grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
+        <SectionCard title="热门问题看板" description="按用户咨询次数排序，辅助发现高频政策服务需求。">
+          <div className="space-y-3">
+            {hotQuestions.map((question) => (
+              <div key={question.id} className="border-b border-border pb-3 last:border-0 last:pb-0">
+                <div className="flex items-start justify-between gap-3">
+                  <p className="text-sm font-medium leading-6 text-foreground">{question.question_text}</p>
+                  <span className="shrink-0 rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
+                    {question.hit_count} 次
+                  </span>
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {question.policy_category ?? "未分类"} · {formatDateTime(question.last_asked_at)}
+                </p>
+              </div>
+            ))}
+            {hotQuestions.length === 0 ? (
+              <p className="text-sm text-muted-foreground">暂无热门问题</p>
+            ) : null}
+          </div>
+        </SectionCard>
+
+        <SectionCard title="标准答案维护" description="为高频问题沉淀人工审核答案。">
+          <form onSubmit={createStandardAnswer} className="mb-5 grid gap-3 md:grid-cols-2">
+            <Field name="title" label="标题" required />
+            <Field name="policy_category" label="政策类别" />
+            <Field name="question_keywords" label="问题关键词" placeholder="用逗号或空格分隔" />
+            <Field name="applicable_scope" label="适用范围" />
+            <label className="block space-y-2 text-sm font-medium text-foreground md:col-span-2">
+              <span>答案内容</span>
+              <textarea
+                name="answer_content"
+                required
+                rows={4}
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+              />
+            </label>
+            <div className="md:col-span-2">
+              <Button type="submit" disabled={loading}>
+                <Save className="size-4" />
+                保存标准答案
+              </Button>
+            </div>
+          </form>
+
+          <div className="space-y-3">
+            {standardAnswers.map((answer) => (
+              <div key={answer.id} className="rounded-lg border border-border p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="font-medium text-foreground">{answer.title}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {answer.policy_category ?? "未分类"} · {answer.status} · {formatDateTime(answer.updated_at)}
+                    </p>
+                  </div>
+                  {answer.status !== "disabled" ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={loading}
+                      onClick={() => disableStandardAnswer(answer)}
+                    >
+                      <Trash2 className="size-3.5" />
+                      停用
+                    </Button>
+                  ) : null}
+                </div>
+                <p className="mt-2 line-clamp-2 text-sm leading-6 text-muted-foreground">
+                  {answer.answer_content}
+                </p>
+              </div>
+            ))}
+            {standardAnswers.length === 0 ? (
+              <p className="text-sm text-muted-foreground">暂无标准答案</p>
+            ) : null}
+          </div>
+        </SectionCard>
+      </div>
+    </div>
+  );
+}
+
+function DocumentRow({
+  document,
+  loading,
+  onRetry,
+  onSave,
+  onDisable,
+}: {
+  document: PolicyDocument;
+  loading: boolean;
+  onRetry: () => void;
+  onSave: (formData: FormData) => void;
+  onDisable: () => void;
+}) {
+  return (
+    <>
+      <tr className="border-t border-border align-top">
+        <td className="px-3 py-3">
+          <div className="flex min-w-0 gap-2">
+            <FileText className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+            <div className="min-w-0">
+              <p className="truncate font-medium text-foreground">{document.title}</p>
+              <p className="truncate text-xs text-muted-foreground">{document.file_name}</p>
+              <p className="text-xs text-muted-foreground">
+                {document.is_attachment ? "附件" : "主文件"}
+              </p>
+            </div>
+          </div>
+        </td>
+        <td className="px-3 py-3 text-xs text-muted-foreground">
+          <p>{document.policy_level}</p>
+          <p>{document.policy_category}</p>
+        </td>
+        <td className="px-3 py-3">
+          <span className={`inline-flex rounded-md border px-2 py-1 text-xs ${statusClassName[document.parse_status]}`}>
+            {statusLabel[document.parse_status]}
+          </span>
+          {document.parse_error ? (
+            <p className="mt-1 line-clamp-2 text-xs text-red-600">{document.parse_error}</p>
+          ) : null}
+        </td>
+        <td className="px-3 py-3 text-sm text-foreground">{document.chunk_count}</td>
+        <td className="px-3 py-3 text-sm text-foreground">{document.is_active ? "启用" : "已禁用"}</td>
+        <td className="px-3 py-3">
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" variant="outline" size="sm" disabled={loading} onClick={onRetry}>
+              <RotateCcw className="size-3.5" />
+              解析
+            </Button>
+            {document.is_active ? (
+              <Button type="button" variant="outline" size="sm" disabled={loading} onClick={onDisable}>
+                <Trash2 className="size-3.5" />
+                禁用
+              </Button>
+            ) : null}
+          </div>
+        </td>
+      </tr>
+      <tr className="border-t border-border bg-muted/20">
+        <td colSpan={6} className="px-3 py-3">
+          <details>
+            <summary className="cursor-pointer text-sm font-medium text-foreground">编辑 metadata</summary>
+            <form
+              className="mt-3 grid gap-3 md:grid-cols-4"
+              onSubmit={(event) => {
+                event.preventDefault();
+                onSave(new FormData(event.currentTarget));
+              }}
+            >
+              <Field name="title" label="标题" defaultValue={document.title} required />
+              <Field name="policy_level" label="层级" defaultValue={document.policy_level} required />
+              <Field name="policy_category" label="类别" defaultValue={document.policy_category} required />
+              <Field name="issuing_department" label="发布部门" defaultValue={document.issuing_department ?? ""} />
+              <Field name="applicable_scope" label="适用范围" defaultValue={document.applicable_scope ?? ""} />
+              <Field name="college" label="学院" defaultValue={document.college ?? ""} />
+              <Field name="version" label="版本" defaultValue={document.version ?? ""} />
+              <Field name="publish_date" label="发布时间" type="date" defaultValue={document.publish_date ?? ""} />
+              <Field name="effective_from" label="生效时间" type="date" defaultValue={document.effective_from ?? ""} />
+              <Field name="effective_to" label="失效时间" type="date" defaultValue={document.effective_to ?? ""} />
+              <label className="flex items-end gap-2 pb-2 text-sm text-foreground">
+                <input name="is_active" type="checkbox" defaultChecked={document.is_active} className="size-4" />
+                <span>启用</span>
+              </label>
+              <div className="flex items-end">
+                <Button type="submit" disabled={loading}>
+                  <Save className="size-4" />
+                  保存
+                </Button>
+              </div>
+            </form>
+          </details>
+        </td>
+      </tr>
+    </>
+  );
+}
+
+function Metric({ icon, label, value }: { icon: ReactNode; label: string; value: number }) {
+  return (
+    <div className="rounded-lg border border-border bg-background p-3">
+      <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
+        {icon}
+        <span>{label}</span>
+      </div>
+      <p className="text-2xl font-semibold text-foreground">{value}</p>
     </div>
   );
 }
@@ -374,4 +673,63 @@ function Field({
       />
     </label>
   );
+}
+
+function SelectField({
+  label,
+  value,
+  onChange,
+  options,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  options: { label: string; value: string }[];
+}) {
+  return (
+    <label className="block space-y-2 text-sm font-medium text-foreground">
+      <span>{label}</span>
+      <select
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+      >
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+function formObject(formData: FormData) {
+  return {
+    title: emptyToNull(formData.get("title")),
+    policy_level: emptyToNull(formData.get("policy_level")),
+    policy_category: emptyToNull(formData.get("policy_category")),
+    issuing_department: emptyToNull(formData.get("issuing_department")),
+    applicable_scope: emptyToNull(formData.get("applicable_scope")),
+    college: emptyToNull(formData.get("college")),
+    version: emptyToNull(formData.get("version")),
+    publish_date: emptyToNull(formData.get("publish_date")),
+    effective_from: emptyToNull(formData.get("effective_from")),
+    effective_to: emptyToNull(formData.get("effective_to")),
+    is_active: formData.get("is_active") === "on",
+  };
+}
+
+function emptyToNull(value: FormDataEntryValue | null) {
+  const text = String(value ?? "").trim();
+  return text ? text : null;
+}
+
+function formatDateTime(value: string) {
+  return new Intl.DateTimeFormat("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(value));
 }

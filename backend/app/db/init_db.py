@@ -28,6 +28,7 @@ def apply_dev_schema_patches() -> None:
         connection.execute(text("ALTER TABLE policy_documents ADD COLUMN IF NOT EXISTS parse_error TEXT"))
         connection.execute(text("ALTER TABLE policy_documents ADD COLUMN IF NOT EXISTS parsed_text_path VARCHAR(500)"))
         connection.execute(text("ALTER TABLE policy_documents ADD COLUMN IF NOT EXISTS parsed_at TIMESTAMP WITH TIME ZONE"))
+        connection.execute(text("ALTER TABLE policy_documents ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE"))
 
 
 if __name__ == "__main__":

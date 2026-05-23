@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.db.dependencies import get_db
 from app.models import PolicyAttachment, PolicyChunk, PolicyDocument, PolicyRelation
-from app.schemas.document import PolicyDocumentResponse
+from app.schemas.document import PolicyDocumentResponse, PolicyDocumentUpdateRequest
 from app.services.document_service import parse_document
 
 router = APIRouter(prefix="/documents", tags=["documents"])
@@ -105,6 +105,39 @@ def retry_parse_document(
         raise HTTPException(status_code=404, detail="政策文件不存在")
 
     document = parse_document(db, document)
+    return serialize_document(db, document)
+
+
+@router.patch("/{document_id}", response_model=PolicyDocumentResponse)
+def update_document(
+    document_id: str,
+    payload: PolicyDocumentUpdateRequest,
+    db: Annotated[Session, Depends(get_db)],
+) -> PolicyDocumentResponse:
+    document = db.get(PolicyDocument, document_id)
+    if document is None:
+        raise HTTPException(status_code=404, detail="政策文件不存在")
+
+    updates = payload.model_dump(exclude_unset=True)
+    for field, value in updates.items():
+        setattr(document, field, value)
+    db.commit()
+    db.refresh(document)
+    return serialize_document(db, document)
+
+
+@router.delete("/{document_id}", response_model=PolicyDocumentResponse)
+def disable_document(
+    document_id: str,
+    db: Annotated[Session, Depends(get_db)],
+) -> PolicyDocumentResponse:
+    document = db.get(PolicyDocument, document_id)
+    if document is None:
+        raise HTTPException(status_code=404, detail="政策文件不存在")
+
+    document.is_active = False
+    db.commit()
+    db.refresh(document)
     return serialize_document(db, document)
 
 
@@ -209,6 +242,7 @@ def serialize_document(db: Session, document: PolicyDocument) -> PolicyDocumentR
         parent_document_id=str(attachment.parent_document_id) if attachment else None,
         attachment_title=attachment.attachment_title if attachment else None,
         chunk_count=chunk_count,
+        is_active=document.is_active,
         created_at=document.created_at,
         updated_at=document.updated_at,
     )

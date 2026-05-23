@@ -36,6 +36,7 @@ class PolicyDocument(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     source_type: Mapped[str | None] = mapped_column(String(50))
     source_url: Mapped[str | None] = mapped_column(String(500))
     authority_rank: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, index=True)
     extra_metadata: Mapped[dict | None] = mapped_column("metadata", JSONB)
 
     chunks = relationship("PolicyChunk", back_populates="document", cascade="all, delete-orphan")

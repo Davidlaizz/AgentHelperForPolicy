@@ -28,7 +28,22 @@ class PolicyDocumentResponse(BaseModel):
     parent_document_id: str | None = None
     attachment_title: str | None = None
     chunk_count: int = 0
+    is_active: bool = True
     created_at: datetime
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class PolicyDocumentUpdateRequest(BaseModel):
+    title: str | None = None
+    policy_level: str | None = None
+    policy_category: str | None = None
+    issuing_department: str | None = None
+    applicable_scope: str | None = None
+    college: str | None = None
+    publish_date: date | None = None
+    effective_from: date | None = None
+    effective_to: date | None = None
+    version: str | None = None
+    is_active: bool | None = None
