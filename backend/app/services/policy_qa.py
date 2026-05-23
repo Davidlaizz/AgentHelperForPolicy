@@ -8,11 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.models import ChatMessage, ChatSession, Citation, HotQuestion, User
 from app.schemas.chat import ChatCitationResponse, ChatResponse
-from app.services.agent import AgentOrchestrator
-from app.services.agent.rules import enrich_retrieval_query, policy_category_for_case
-from app.services.llm_provider import get_llm_provider
-from app.services.rag.metadata_filter import RetrievalFilters
-from app.services.rag.retriever import hybrid_search
+from app.services.agent_graph import run_policy_multi_agent_graph
 
 
 def answer_policy_question(
@@ -29,34 +25,19 @@ def answer_policy_question(
     session.add(user_message)
     session.flush()
 
-    orchestrator = AgentOrchestrator()
-    agent_state = orchestrator.prepare(session, chat_session=chat_session, question=question)
-    effective_policy_category = policy_category or policy_category_for_case(agent_state.case_type)
-    retrieval_query = enrich_retrieval_query(question, agent_state.case_type)
-
-    retrieved = hybrid_search(
+    graph_result = run_policy_multi_agent_graph(
         session,
-        retrieval_query,
-        RetrievalFilters(
-            policy_category=effective_policy_category,
-            include_expired=include_expired,
-        ),
+        chat_session=chat_session,
+        question=question,
         top_k=top_k,
+        policy_category=policy_category,
+        include_expired=include_expired,
     )
-    if not retrieved and effective_policy_category and policy_category is None:
-        retrieved = hybrid_search(
-            session,
-            retrieval_query,
-            RetrievalFilters(include_expired=include_expired),
-            top_k=top_k,
-        )
-    prompt = build_policy_prompt(
-        question,
-        retrieved,
-        agent_context=orchestrator.build_prompt_context(agent_state),
-    )
-    raw_answer = get_llm_provider().generate(prompt, retrieved)
-    policy_basis, ai_inference = split_answer_sections(raw_answer)
+    final_state = graph_result.state
+    retrieved = final_state.get("retrieved_chunks") or []
+    raw_answer = final_state.get("final_answer") or ""
+    policy_basis = final_state.get("policy_basis") or raw_answer
+    ai_inference = final_state.get("ai_inference") or "未生成额外推断。"
 
     assistant_message = ChatMessage(
         session_id=chat_session.id,
@@ -66,20 +47,13 @@ def answer_policy_question(
             "policy_basis": policy_basis,
             "ai_inference": ai_inference,
             "retrieved_count": len(retrieved),
+            "agent": graph_result.agent_response.model_dump(),
         },
     )
     session.add(assistant_message)
     session.flush()
 
     citations = create_citations(session, assistant_message, retrieved)
-    agent_response = orchestrator.finalize(
-        session,
-        state=agent_state,
-        chat_session=chat_session,
-        assistant_message=assistant_message,
-        retrieved=retrieved,
-        answer=raw_answer,
-    )
     update_hot_question(session, question, policy_category)
     session.commit()
     session.refresh(user_message)
@@ -95,7 +69,7 @@ def answer_policy_question(
         ai_inference=ai_inference,
         citations=citations,
         retrieved_chunks=retrieved,
-        agent=agent_response,
+        agent=graph_result.agent_response,
     )
 
 

@@ -9,6 +9,8 @@ from sqlalchemy.orm import Session
 
 from app.db.dependencies import get_db
 from app.models import (
+    AgentRun,
+    AgentStepLog,
     ChatMessage,
     HotQuestion,
     MemoryItem,
@@ -16,6 +18,14 @@ from app.models import (
     PolicyDocument,
     ServiceCase,
     StandardAnswer,
+)
+from app.schemas.agent_graph import (
+    AgentGraphEdgeResponse,
+    AgentGraphNodeResponse,
+    AgentGraphResponse,
+    AgentRunDetailResponse,
+    AgentRunListItem,
+    AgentStepLogResponse,
 )
 from app.schemas.management import (
     CategoryCount,
@@ -27,6 +37,7 @@ from app.schemas.management import (
     StandardAnswerResponse,
     StandardAnswerUpdateRequest,
 )
+from app.services.agent_graph.config import AGENT_EDGE_DEFINITIONS, AGENT_NODE_DEFINITIONS, GRAPH_DESCRIPTION, GRAPH_VERSION
 from app.services.policy_qa import is_valid_hot_question
 
 router = APIRouter(prefix="/management", tags=["management"])
@@ -200,6 +211,76 @@ def list_policy_chunks(
     )
 
 
+@router.get("/agent-graph", response_model=AgentGraphResponse)
+def agent_graph(db: Annotated[Session, Depends(get_db)]) -> AgentGraphResponse:
+    return AgentGraphResponse(
+        version=GRAPH_VERSION,
+        description=GRAPH_DESCRIPTION,
+        nodes=[agent_node_response(db, item) for item in AGENT_NODE_DEFINITIONS],
+        edges=[
+            AgentGraphEdgeResponse(
+                source=item["source"],
+                target=item["target"],
+                condition=item.get("condition"),
+                condition_expression=item.get("condition_expression"),
+            )
+            for item in AGENT_EDGE_DEFINITIONS
+        ],
+    )
+
+
+@router.get("/agent-nodes", response_model=list[AgentGraphNodeResponse])
+def agent_nodes(db: Annotated[Session, Depends(get_db)]) -> list[AgentGraphNodeResponse]:
+    return [agent_node_response(db, item) for item in AGENT_NODE_DEFINITIONS]
+
+
+@router.get("/agent-runs", response_model=list[AgentRunListItem])
+def agent_runs(
+    db: Annotated[Session, Depends(get_db)],
+    limit: Annotated[int, Query(ge=1, le=50)] = 10,
+) -> list[AgentRunListItem]:
+    rows = db.execute(
+        select(AgentRun)
+        .order_by(AgentRun.started_at.desc())
+        .limit(limit)
+    ).scalars().all()
+    return [serialize_agent_run(row) for row in rows]
+
+
+@router.get("/agent-runs/{run_id}", response_model=AgentRunDetailResponse)
+def agent_run_detail(
+    run_id: str,
+    db: Annotated[Session, Depends(get_db)],
+) -> AgentRunDetailResponse:
+    run = db.get(AgentRun, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Agent 运行记录不存在")
+
+    steps = db.execute(
+        select(AgentStepLog)
+        .where(AgentStepLog.run_id == run.id)
+        .order_by(AgentStepLog.started_at.asc())
+    ).scalars().all()
+    return AgentRunDetailResponse(
+        run=serialize_agent_run(run),
+        steps=[
+            AgentStepLogResponse(
+                id=str(step.id),
+                node_key=step.node_key,
+                node_name=step.node_name,
+                status=step.status,
+                input_summary=step.input_summary,
+                output_summary=step.output_summary,
+                started_at=step.started_at,
+                finished_at=step.finished_at,
+                duration_ms=step.duration_ms,
+                error_message=step.error_message,
+            )
+            for step in steps
+        ],
+    )
+
+
 def scalar_count(db: Session, statement) -> int:
     return int(db.execute(statement).scalar_one() or 0)
 
@@ -216,6 +297,48 @@ def count_high_risk_answers(db: Session) -> int:
         if (((metadata or {}).get("agent") or {}).get("risk") or {}).get("risk_level") == "high":
             count += 1
     return count
+
+
+def agent_node_response(db: Session, item: dict) -> AgentGraphNodeResponse:
+    avg_duration = db.execute(
+        select(func.avg(AgentStepLog.duration_ms)).where(
+            AgentStepLog.node_key == item["id"],
+            AgentStepLog.status == "success",
+        )
+    ).scalar()
+    failure_count = scalar_count(
+        db,
+        select(func.count(AgentStepLog.id)).where(
+            AgentStepLog.node_key == item["id"],
+            AgentStepLog.status == "failed",
+        ),
+    )
+    return AgentGraphNodeResponse(
+        id=item["id"],
+        label=item["label"],
+        type=item["type"],
+        description=item.get("description"),
+        input_keys=item.get("input_keys"),
+        output_keys=item.get("output_keys"),
+        enabled=True,
+        average_duration_ms=int(avg_duration or 0) if avg_duration is not None else None,
+        failure_count=failure_count,
+    )
+
+
+def serialize_agent_run(run: AgentRun) -> AgentRunListItem:
+    return AgentRunListItem(
+        run_id=str(run.id),
+        session_id=str(run.session_id) if run.session_id else None,
+        question=run.question,
+        intent=run.intent,
+        case_type=run.case_type,
+        status=run.status,
+        risk_level=run.risk_level,
+        started_at=run.started_at,
+        finished_at=run.finished_at,
+        duration_ms=run.duration_ms,
+    )
 
 
 def top_policy_categories(db: Session) -> list[CategoryCount]:

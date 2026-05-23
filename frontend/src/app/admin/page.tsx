@@ -1,11 +1,13 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import {
   BarChart3,
   BookOpenCheck,
+  Activity,
   FileText,
+  GitBranch,
   MessageSquareText,
   RefreshCw,
   RotateCcw,
@@ -13,6 +15,7 @@ import {
   ShieldAlert,
   Trash2,
   Upload,
+  Workflow,
 } from "lucide-react";
 
 import { SectionCard } from "@/components/section-card";
@@ -77,6 +80,63 @@ type StandardAnswer = {
   updated_at: string;
 };
 
+type AgentGraphNode = {
+  id: string;
+  label: string;
+  type: string;
+  description: string | null;
+  input_keys: string[] | Record<string, unknown> | null;
+  output_keys: string[] | Record<string, unknown> | null;
+  enabled: boolean;
+  average_duration_ms: number | null;
+  failure_count: number;
+};
+
+type AgentGraphEdge = {
+  source: string;
+  target: string;
+  condition: string | null;
+  condition_expression: string | null;
+};
+
+type AgentGraph = {
+  version: string;
+  description: string;
+  nodes: AgentGraphNode[];
+  edges: AgentGraphEdge[];
+};
+
+type AgentRun = {
+  run_id: string;
+  session_id: string | null;
+  question: string;
+  intent: string | null;
+  case_type: string | null;
+  status: string;
+  risk_level: string | null;
+  started_at: string;
+  finished_at: string | null;
+  duration_ms: number | null;
+};
+
+type AgentStepLog = {
+  id: string;
+  node_key: string;
+  node_name: string;
+  status: string;
+  input_summary: string | null;
+  output_summary: string | null;
+  started_at: string;
+  finished_at: string | null;
+  duration_ms: number | null;
+  error_message: string | null;
+};
+
+type AgentRunDetail = {
+  run: AgentRun;
+  steps: AgentStepLog[];
+};
+
 const apiBaseUrl =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000";
 
@@ -101,6 +161,9 @@ export default function AdminPage() {
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
   const [hotQuestions, setHotQuestions] = useState<HotQuestion[]>([]);
   const [standardAnswers, setStandardAnswers] = useState<StandardAnswer[]>([]);
+  const [agentGraph, setAgentGraph] = useState<AgentGraph | null>(null);
+  const [agentRuns, setAgentRuns] = useState<AgentRun[]>([]);
+  const [agentRunDetail, setAgentRunDetail] = useState<AgentRunDetail | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [documentRole, setDocumentRole] = useState<"main" | "attachment">("main");
   const [parentDocumentId, setParentDocumentId] = useState("");
@@ -113,25 +176,43 @@ export default function AdminPage() {
     [documents],
   );
 
-  async function loadAll() {
-    const [documentResponse, dashboardResponse, hotResponse, answerResponse] =
+  const loadAgentRunDetail = useCallback(async (runId: string) => {
+    const response = await fetch(`${apiBaseUrl}/api/management/agent-runs/${runId}`, { cache: "no-store" });
+    if (!response.ok) throw new Error("Agent 运行详情加载失败");
+    setAgentRunDetail(await response.json());
+  }, []);
+
+  const loadAll = useCallback(async () => {
+    const [documentResponse, dashboardResponse, hotResponse, answerResponse, agentGraphResponse, agentRunsResponse] =
       await Promise.all([
         fetch(`${apiBaseUrl}/api/documents`, { cache: "no-store" }),
         fetch(`${apiBaseUrl}/api/management/dashboard`, { cache: "no-store" }),
         fetch(`${apiBaseUrl}/api/management/hot-questions?limit=8`, { cache: "no-store" }),
         fetch(`${apiBaseUrl}/api/management/standard-answers`, { cache: "no-store" }),
+        fetch(`${apiBaseUrl}/api/management/agent-graph`, { cache: "no-store" }),
+        fetch(`${apiBaseUrl}/api/management/agent-runs?limit=8`, { cache: "no-store" }),
       ]);
 
     if (!documentResponse.ok) throw new Error("文件列表加载失败");
     if (!dashboardResponse.ok) throw new Error("看板指标加载失败");
     if (!hotResponse.ok) throw new Error("热门问题加载失败");
     if (!answerResponse.ok) throw new Error("标准答案加载失败");
+    if (!agentGraphResponse.ok) throw new Error("Agent 架构加载失败");
+    if (!agentRunsResponse.ok) throw new Error("Agent 运行记录加载失败");
 
     setDocuments(await documentResponse.json());
     setDashboard(await dashboardResponse.json());
     setHotQuestions(await hotResponse.json());
     setStandardAnswers(await answerResponse.json());
-  }
+    setAgentGraph(await agentGraphResponse.json());
+    const agentRunsData: AgentRun[] = await agentRunsResponse.json();
+    setAgentRuns(agentRunsData);
+    if (agentRunsData[0]) {
+      await loadAgentRunDetail(agentRunsData[0].run_id);
+    } else {
+      setAgentRunDetail(null);
+    }
+  }, [loadAgentRunDetail]);
 
   useEffect(() => {
     let cancelled = false;
@@ -151,7 +232,7 @@ export default function AdminPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [loadAll]);
 
   async function handleUpload(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -334,6 +415,128 @@ export default function AdminPage() {
             刷新后台数据
           </Button>
           {message ? <p className="text-sm text-muted-foreground">{message}</p> : null}
+        </div>
+      </SectionCard>
+
+      <SectionCard title="Agent 架构与运行轨迹" description="展示 LangGraph 多 Agent 编排节点、条件路由和最近运行状态。">
+        <div className="mb-4 grid gap-3 md:grid-cols-3">
+          <Metric icon={<Workflow className="size-4" />} label="Agent 节点" value={agentGraph?.nodes.length ?? 0} />
+          <Metric icon={<GitBranch className="size-4" />} label="路由边" value={agentGraph?.edges.length ?? 0} />
+          <Metric icon={<Activity className="size-4" />} label="最近运行" value={agentRuns.length} />
+        </div>
+
+        <div className="grid gap-5 xl:grid-cols-[1.1fr_0.9fr]">
+          <div className="space-y-3">
+            <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+              <span className="font-medium text-foreground">{agentGraph?.version ?? "未加载"}</span>
+              <span>{agentGraph?.description ?? "暂无 Agent 编排信息"}</span>
+            </div>
+            <div className="grid gap-3 md:grid-cols-2">
+              {(agentGraph?.nodes ?? []).map((node) => (
+                <div key={node.id} className="rounded-lg border border-border bg-background p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium text-foreground">{node.label}</p>
+                      <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">
+                        {node.description}
+                      </p>
+                    </div>
+                    <span className="shrink-0 rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
+                      {node.type}
+                    </span>
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-2 text-xs text-muted-foreground">
+                    <span>平均 {node.average_duration_ms ?? 0}ms</span>
+                    <span>失败 {node.failure_count}</span>
+                    <span>{node.enabled ? "启用" : "停用"}</span>
+                  </div>
+                </div>
+              ))}
+              {!agentGraph?.nodes.length ? (
+                <p className="text-sm text-muted-foreground">暂无 Agent 节点信息</p>
+              ) : null}
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            <div className="rounded-lg border border-border">
+              <div className="border-b border-border px-3 py-2 text-sm font-medium text-foreground">
+                条件路由
+              </div>
+              <div className="max-h-72 overflow-auto p-3">
+                <div className="space-y-2">
+                  {(agentGraph?.edges ?? []).map((edge, index) => (
+                    <div key={`${edge.source}-${edge.target}-${index}`} className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <span className="rounded-md bg-muted px-2 py-1 text-foreground">{edge.source}</span>
+                      <span>→</span>
+                      <span className="rounded-md bg-muted px-2 py-1 text-foreground">{edge.target}</span>
+                      <span className="truncate">{edge.condition ?? "always"}</span>
+                    </div>
+                  ))}
+                  {!agentGraph?.edges.length ? <p className="text-sm text-muted-foreground">暂无路由信息</p> : null}
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-border">
+              <div className="border-b border-border px-3 py-2 text-sm font-medium text-foreground">
+                最近运行
+              </div>
+              <div className="divide-y divide-border">
+                {agentRuns.map((run) => (
+                  <div key={run.run_id} className="px-3 py-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <p className="line-clamp-2 text-sm font-medium leading-6 text-foreground">{run.question}</p>
+                      <div className="flex shrink-0 items-center gap-2">
+                        <span className="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
+                          {run.status}
+                        </span>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => loadAgentRunDetail(run.run_id)}
+                        >
+                          查看
+                        </Button>
+                      </div>
+                    </div>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {run.intent ?? "unknown"} / {run.case_type ?? "general"} / {run.risk_level ?? "未评估"} / {run.duration_ms ?? 0}ms
+                    </p>
+                    <p className="mt-1 text-xs text-muted-foreground">{formatDateTime(run.started_at)}</p>
+                  </div>
+                ))}
+                {agentRuns.length === 0 ? (
+                  <p className="px-3 py-6 text-sm text-muted-foreground">暂无 Agent 运行记录</p>
+                ) : null}
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-border">
+              <div className="border-b border-border px-3 py-2 text-sm font-medium text-foreground">
+                执行步骤
+              </div>
+              <div className="max-h-96 divide-y divide-border overflow-auto">
+                {(agentRunDetail?.steps ?? []).map((step) => (
+                  <div key={step.id} className="px-3 py-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="truncate text-sm font-medium text-foreground">{step.node_name}</p>
+                      <span className="shrink-0 text-xs text-muted-foreground">
+                        {step.status} / {step.duration_ms ?? 0}ms
+                      </span>
+                    </div>
+                    <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">
+                      {step.output_summary ?? step.error_message ?? step.input_summary ?? "无摘要"}
+                    </p>
+                  </div>
+                ))}
+                {!agentRunDetail?.steps.length ? (
+                  <p className="px-3 py-6 text-sm text-muted-foreground">暂无执行步骤</p>
+                ) : null}
+              </div>
+            </div>
+          </div>
         </div>
       </SectionCard>
 
