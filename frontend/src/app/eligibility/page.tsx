@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 
 import { SectionCard } from "@/components/section-card";
+import { MarkdownText } from "@/components/markdown-text";
 import { Button } from "@/components/ui/button";
 
 type AgentSlot = {
@@ -211,9 +212,7 @@ export default function EligibilityPage() {
 
         <div className="grid gap-6 xl:grid-cols-2">
           <SectionCard title="政策依据" description="当前回答引用的主要政策信息。">
-            <p className="whitespace-pre-wrap text-sm leading-6 text-foreground">
-              {current?.policy_basis ?? "暂无政策依据。"}
-            </p>
+            <MarkdownText text={current?.policy_basis ?? ""} emptyText="暂无政策依据。" />
           </SectionCard>
 
           <SectionCard title="材料与流程" description="从检索片段中抽取材料线索和办理步骤。">

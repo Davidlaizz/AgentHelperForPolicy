@@ -4,6 +4,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "re
 import { Bot, FileText, Loader2, MessageSquareText, Send, UserRound } from "lucide-react";
 
 import { SectionCard } from "@/components/section-card";
+import { MarkdownText } from "@/components/markdown-text";
 import { Button } from "@/components/ui/button";
 
 type Citation = {
@@ -273,17 +274,13 @@ function AnswerContent({ response }: { response: ChatResponse }) {
   return (
     <div className="space-y-4">
       <div className="grid gap-3 md:grid-cols-2">
-        <div className="rounded-lg border border-border bg-muted/30 p-3">
+        <div className="rounded-lg border border-border bg-muted/30 p-4">
           <h3 className="mb-2 text-sm font-semibold text-foreground">政策依据</h3>
-          <p className="whitespace-pre-wrap text-sm leading-6 text-foreground">
-            {response.policy_basis}
-          </p>
+          <MarkdownText text={response.policy_basis} emptyText="暂无政策依据。" />
         </div>
-        <div className="rounded-lg border border-border bg-muted/30 p-3">
+        <div className="rounded-lg border border-border bg-muted/30 p-4">
           <h3 className="mb-2 text-sm font-semibold text-foreground">AI 推断</h3>
-          <p className="whitespace-pre-wrap text-sm leading-6 text-foreground">
-            {response.ai_inference}
-          </p>
+          <MarkdownText text={response.ai_inference} emptyText="暂无 AI 推断。" />
         </div>
       </div>
 
