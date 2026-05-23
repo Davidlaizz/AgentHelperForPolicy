@@ -164,20 +164,29 @@ const statusClassName: Record<PolicyDocument["parse_status"], string> = {
   failed: "border-red-200 bg-red-50 text-red-700",
 };
 
-const flowLayers = [
-  { title: "入口", nodes: ["memory_read"] },
-  { title: "理解", nodes: ["intent", "case", "slot"] },
-  { title: "知识", nodes: ["retrieval", "evidence"] },
-  { title: "分支", nodes: ["followup", "eligibility", "workflow", "risk"] },
-  { title: "生成", nodes: ["answer", "memory_write"] },
-];
-
 const conditionLabels: Record<string, string> = {
   always: "固定流转",
   missing_slots: "存在缺失条件",
   eligibility_check: "资格判断",
   workflow_or_material: "流程或材料",
   policy_qa_or_general: "普通问答",
+};
+
+const graphNodePositions: Record<string, { x: number; y: number; width: number; height: number; layer: string }> = {
+  start: { x: 30, y: 318, width: 80, height: 42, layer: "入口" },
+  memory_read: { x: 140, y: 300, width: 150, height: 78, layer: "记忆" },
+  intent: { x: 320, y: 300, width: 150, height: 78, layer: "理解" },
+  case: { x: 500, y: 300, width: 150, height: 78, layer: "理解" },
+  slot: { x: 680, y: 300, width: 150, height: 78, layer: "理解" },
+  retrieval: { x: 860, y: 300, width: 150, height: 78, layer: "知识" },
+  evidence: { x: 1040, y: 300, width: 150, height: 78, layer: "知识" },
+  followup: { x: 1220, y: 160, width: 150, height: 78, layer: "分支" },
+  eligibility: { x: 1220, y: 300, width: 150, height: 78, layer: "分支" },
+  workflow: { x: 1220, y: 440, width: 150, height: 78, layer: "分支" },
+  risk: { x: 1400, y: 300, width: 150, height: 78, layer: "治理" },
+  answer: { x: 1400, y: 440, width: 150, height: 78, layer: "生成" },
+  memory_write: { x: 1400, y: 560, width: 150, height: 78, layer: "记忆" },
+  end: { x: 1435, y: 680, width: 80, height: 42, layer: "结束" },
 };
 
 export default function AdminPage() {
@@ -817,7 +826,6 @@ function AgentFlowDiagram({
 }) {
   const executed = new Set(selectedSteps.map((step) => step.node_key));
   const failed = new Set(selectedSteps.filter((step) => step.status === "failed").map((step) => step.node_key));
-  const nodeById = new Map((graph?.nodes ?? []).map((node) => [node.id, node]));
 
   if (!graph?.nodes.length) {
     return (
@@ -831,8 +839,8 @@ function AgentFlowDiagram({
     <div className="rounded-lg border border-border bg-background p-4">
       <div className="mb-3 flex items-center justify-between gap-3">
         <div>
-          <p className="text-sm font-medium text-foreground">多 Agent 状态图</p>
-          <p className="text-xs text-muted-foreground">按 LangGraph 编排顺序展示节点、路由和最近运行命中情况。</p>
+          <p className="text-sm font-medium text-foreground">多 Agent 编排图</p>
+          <p className="text-xs text-muted-foreground">一张图展示 Agent 节点、路由边、条件和最近运行命中情况。</p>
         </div>
         <div className="flex shrink-0 flex-wrap gap-2 text-xs text-muted-foreground">
           <span className="rounded-md bg-emerald-50 px-2 py-1 text-emerald-700">已执行</span>
@@ -840,66 +848,100 @@ function AgentFlowDiagram({
           <span className="rounded-md bg-muted px-2 py-1">未命中</span>
         </div>
       </div>
-      <div className="space-y-3">
-        <div className="flex justify-center">
-          <FlowTerminus label="Start" />
-        </div>
-        {flowLayers.map((layer, layerIndex) => (
-          <div key={layer.title} className="space-y-2">
-            <div className="flex items-center gap-2">
-              <span className="rounded-md bg-muted px-2 py-1 text-xs font-medium text-foreground">
-                {layer.title}
-              </span>
-              <div className="h-px flex-1 bg-border" />
-            </div>
-            <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
-              {layer.nodes.map((nodeId) => {
-                const node = nodeById.get(nodeId);
-                if (!node) {
-                  return null;
-                }
-                return (
-                  <FlowNodeButton
-                    key={node.id}
-                    node={node}
-                    active={selection?.kind === "node" && selection.id === node.id}
-                    executed={executed.has(node.id)}
-                    failed={failed.has(node.id)}
-                    onClick={() => onSelect({ kind: "node", id: node.id })}
+      <div className="overflow-x-auto rounded-lg border border-border bg-muted/20">
+        <svg viewBox="0 0 1580 760" className="min-h-[560px] min-w-[1180px]">
+          <defs>
+            <marker
+              id="agent-arrow"
+              markerHeight="8"
+              markerWidth="8"
+              orient="auto"
+              refX="7"
+              refY="4"
+            >
+              <path d="M0,0 L8,4 L0,8 Z" fill="currentColor" />
+            </marker>
+          </defs>
+
+          {Object.entries(layerBands()).map(([name, band]) => (
+            <g key={name}>
+              <rect
+                x={band.x}
+                y={band.y}
+                width={band.width}
+                height={band.height}
+                rx="16"
+                className="fill-background/70 stroke-border"
+              />
+              <text x={band.x + 14} y={band.y + 24} className="fill-muted-foreground text-[13px] font-medium">
+                {name}
+              </text>
+            </g>
+          ))}
+
+          {graph.edges.map((edge, index) => {
+            const key = edgeKey(edge, index);
+            const path = edgePath(edge);
+            const label = edgeLabelPoint(edge);
+            const active = selection?.kind === "edge" && selection.id === key;
+            return (
+              <g key={key}>
+                <path
+                  d={path}
+                  className={active ? "fill-none stroke-primary" : "fill-none stroke-muted-foreground/50"}
+                  strokeWidth="2"
+                  markerEnd="url(#agent-arrow)"
+                />
+                <path
+                  d={path}
+                  className="cursor-pointer fill-none stroke-transparent"
+                  strokeWidth="16"
+                  onClick={() => onSelect({ kind: "edge", id: key })}
+                />
+                <g
+                  className="cursor-pointer"
+                  onClick={() => onSelect({ kind: "edge", id: key })}
+                >
+                  <rect
+                    x={label.x - 44}
+                    y={label.y - 12}
+                    width="88"
+                    height="24"
+                    rx="6"
+                    className={active ? "fill-primary" : "fill-background stroke-border"}
                   />
-                );
-              })}
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {edgesForLayer(graph.edges, layer.nodes, layerIndex).map((edge) => {
-                const key = edgeKey(edge.edge, edge.index);
-                return (
-                  <button
-                    key={key}
-                    type="button"
-                    onClick={() => onSelect({ kind: "edge", id: key })}
-                    className={`rounded-md border px-2 py-1 text-left text-xs transition ${
-                      selection?.kind === "edge" && selection.id === key
-                        ? "border-primary bg-primary/10 text-primary"
-                        : "border-border bg-background text-muted-foreground hover:border-primary/50"
-                    }`}
+                  <text
+                    x={label.x}
+                    y={label.y + 4}
+                    textAnchor="middle"
+                    className={active ? "fill-primary-foreground text-[11px]" : "fill-muted-foreground text-[11px]"}
                   >
-                    {edge.edge.source} → {edge.edge.target} · {conditionText(edge.edge.condition)}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        ))}
-        <div className="flex justify-center">
-          <FlowTerminus label="End" />
-        </div>
+                    {conditionText(edge.condition)}
+                  </text>
+                </g>
+              </g>
+            );
+          })}
+
+          <EndpointNode id="start" label="Start" />
+          {(graph.nodes ?? []).map((node) => (
+            <SvgAgentNode
+              key={node.id}
+              node={node}
+              active={selection?.kind === "node" && selection.id === node.id}
+              executed={executed.has(node.id)}
+              failed={failed.has(node.id)}
+              onClick={() => onSelect({ kind: "node", id: node.id })}
+            />
+          ))}
+          <EndpointNode id="end" label="End" />
+        </svg>
       </div>
     </div>
   );
 }
 
-function FlowNodeButton({
+function SvgAgentNode({
   node,
   active,
   executed,
@@ -912,44 +954,64 @@ function FlowNodeButton({
   failed: boolean;
   onClick: () => void;
 }) {
-  const stateClass = failed
-    ? "border-red-200 bg-red-50"
-    : executed
-      ? "border-emerald-200 bg-emerald-50"
-      : "border-border bg-muted/30";
+  const box = graphNodePositions[node.id];
+  if (!box) {
+    return null;
+  }
+  const fillClass = failed ? "fill-red-50" : executed ? "fill-emerald-50" : "fill-background";
+  const strokeClass = active
+    ? "stroke-primary"
+    : failed
+      ? "stroke-red-300"
+      : executed
+        ? "stroke-emerald-300"
+        : "stroke-border";
 
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`min-h-28 rounded-lg border p-3 text-left transition hover:border-primary/50 ${
-        active ? "ring-2 ring-primary/40" : ""
-      } ${stateClass}`}
-    >
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <span className="rounded-md bg-background px-2 py-1 text-xs text-muted-foreground">
-          {node.type}
-        </span>
-        <span className="rounded-md bg-background px-2 py-1 text-xs text-muted-foreground">
-          {executed ? "已执行" : "未命中"}
-        </span>
-      </div>
-      <p className="truncate text-sm font-medium text-foreground">{node.label}</p>
-      <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">{node.description}</p>
-      <div className="mt-2 flex flex-wrap gap-2 text-xs text-muted-foreground">
-        <span>入 {countKeys(node.input_keys)}</span>
-        <span>出 {countKeys(node.output_keys)}</span>
-        <span>{node.average_duration_ms ?? 0}ms</span>
-      </div>
-    </button>
+    <g className="cursor-pointer" onClick={onClick}>
+      <rect
+        x={box.x}
+        y={box.y}
+        width={box.width}
+        height={box.height}
+        rx="12"
+        className={`${fillClass} ${strokeClass}`}
+        strokeWidth={active ? 3 : 1.5}
+      />
+      <text x={box.x + 12} y={box.y + 22} className="fill-foreground text-[14px] font-semibold">
+        {node.label}
+      </text>
+      <text x={box.x + 12} y={box.y + 43} className="fill-muted-foreground text-[12px]">
+        {node.type} · {executed ? "已执行" : "未命中"}
+      </text>
+      <text x={box.x + 12} y={box.y + 63} className="fill-muted-foreground text-[11px]">
+        入 {countKeys(node.input_keys)} / 出 {countKeys(node.output_keys)} / {node.average_duration_ms ?? 0}ms
+      </text>
+    </g>
   );
 }
 
-function FlowTerminus({ label }: { label: string }) {
+function EndpointNode({ id, label }: { id: "start" | "end"; label: string }) {
+  const box = graphNodePositions[id];
   return (
-    <div className="rounded-full border border-border bg-muted px-4 py-1 text-xs font-medium text-muted-foreground">
-      {label}
-    </div>
+    <g>
+      <rect
+        x={box.x}
+        y={box.y}
+        width={box.width}
+        height={box.height}
+        rx="21"
+        className="fill-background stroke-border"
+      />
+      <text
+        x={box.x + box.width / 2}
+        y={box.y + box.height / 2 + 5}
+        textAnchor="middle"
+        className="fill-muted-foreground text-[13px] font-medium"
+      >
+        {label}
+      </text>
+    </g>
   );
 }
 
@@ -1320,12 +1382,6 @@ function edgeKey(edge: AgentGraphEdge, index: number) {
   return `${edge.source}-${edge.target}-${edge.condition ?? "always"}-${index}`;
 }
 
-function edgesForLayer(edges: AgentGraphEdge[], nodeIds: string[], layerIndex: number) {
-  return edges
-    .map((edge, index) => ({ edge, index }))
-    .filter(({ edge }) => nodeIds.includes(edge.source) || (layerIndex === 0 && edge.source === "start"));
-}
-
 function conditionText(condition: string | null) {
   return conditionLabels[condition ?? "always"] ?? condition ?? "固定流转";
 }
@@ -1340,6 +1396,49 @@ function conditionExplanation(condition: string | null) {
     policy_qa_or_general: "普通政策问答或一般咨询会跳过资格/流程分支，直接进入风险校验。",
   };
   return descriptions[key] ?? "该条件由 LangGraph 路由规则控制。";
+}
+
+function layerBands() {
+  return {
+    入口: { x: 18, y: 282, width: 292, height: 118 },
+    理解: { x: 308, y: 282, width: 540, height: 118 },
+    知识: { x: 848, y: 282, width: 360, height: 118 },
+    分支: { x: 1208, y: 128, width: 178, height: 412 },
+    治理生成: { x: 1388, y: 282, width: 178, height: 470 },
+  };
+}
+
+function edgePath(edge: AgentGraphEdge) {
+  const source = graphNodePositions[edge.source];
+  const target = graphNodePositions[edge.target];
+  if (!source || !target) {
+    return "";
+  }
+  const sx = source.x + source.width;
+  const sy = source.y + source.height / 2;
+  const tx = target.x;
+  const ty = target.y + target.height / 2;
+  if (Math.abs(sy - ty) < 4) {
+    return `M ${sx} ${sy} L ${tx} ${ty}`;
+  }
+  const midX = sx + Math.max(40, (tx - sx) / 2);
+  return `M ${sx} ${sy} C ${midX} ${sy}, ${midX} ${ty}, ${tx} ${ty}`;
+}
+
+function edgeLabelPoint(edge: AgentGraphEdge) {
+  const source = graphNodePositions[edge.source];
+  const target = graphNodePositions[edge.target];
+  if (!source || !target) {
+    return { x: 0, y: 0 };
+  }
+  const sx = source.x + source.width;
+  const sy = source.y + source.height / 2;
+  const tx = target.x;
+  const ty = target.y + target.height / 2;
+  return {
+    x: sx + (tx - sx) * 0.55,
+    y: sy + (ty - sy) * 0.55 - 10,
+  };
 }
 
 function formatDateTime(value: string) {
