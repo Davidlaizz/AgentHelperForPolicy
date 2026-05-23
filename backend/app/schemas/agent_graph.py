@@ -13,8 +13,11 @@ class AgentGraphNodeResponse(BaseModel):
     input_keys: list[str] | dict | None = None
     output_keys: list[str] | dict | None = None
     enabled: bool = True
+    call_count: int = 0
     average_duration_ms: int | None = None
     failure_count: int = 0
+    last_failure_message: str | None = None
+    last_failure_at: datetime | None = None
 
 
 class AgentGraphEdgeResponse(BaseModel):

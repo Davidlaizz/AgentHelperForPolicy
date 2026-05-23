@@ -121,6 +121,7 @@ def timed_node(
         input_summary = summarize_state(state, input_keys)
         try:
             update = func(state)
+            validate_node_update(node_key, update, output_keys)
             duration_ms = int((perf_counter() - start) * 1000)
             output_summary = summarize_state({**state, **update}, output_keys)
             log_agent_step(
@@ -158,3 +159,9 @@ def timed_node(
             raise
 
     return wrapper
+
+
+def validate_node_update(node_key: str, update: dict[str, Any], output_keys: list[str]) -> None:
+    missing = [key for key in output_keys if key not in update]
+    if missing:
+        raise ValueError(f"{node_key} 节点输出缺少字段：{', '.join(missing)}")

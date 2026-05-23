@@ -25,12 +25,11 @@ from app.services.agent.rules import (
     INTENT_WORKFLOW,
     build_material_list,
     build_workflow_steps,
-    classify_intent,
     detect_case_type,
     enrich_retrieval_query,
-    extract_slots,
     policy_category_for_case,
 )
+from app.services.agent_graph.structured import classify_intent_structured, extract_slots_structured
 from app.services.llm_provider import get_llm_provider
 from app.services.memory import read_memory_snapshot, record_memory_item
 from app.services.memory.store import MemorySnapshot
@@ -70,7 +69,14 @@ class IntentAgent(BaseGraphAgent):
     node_name = "IntentAgent"
 
     def run(self, state: PolicyAgentState) -> dict[str, Any]:
-        return {"intent": classify_intent(state["question"])}
+        result = classify_intent_structured(state["question"])
+        return {
+            "intent": result.intent,
+            "intent_analysis": {
+                "confidence": result.confidence,
+                "reason": result.reason,
+            },
+        }
 
 
 class CaseAgent(BaseGraphAgent):
@@ -95,7 +101,8 @@ class SlotAgent(BaseGraphAgent):
         if case is None:
             return {"extracted_slots": {}, "case_slots": [], "missing_slots": []}
 
-        extracted_slots = extract_slots(state["question"])
+        slot_result = extract_slots_structured(state["question"], state.get("case_type") or case.case_type)
+        extracted_slots = slot_result.extracted_slots
         intent = state.get("intent") or INTENT_POLICY_QA
         if extracted_slots and intent == INTENT_POLICY_QA:
             intent = INTENT_ELIGIBILITY
@@ -118,6 +125,10 @@ class SlotAgent(BaseGraphAgent):
         return {
             "intent": intent,
             "extracted_slots": extracted_slots,
+            "slot_analysis": {
+                "confidence": slot_result.confidence,
+                "reason": slot_result.reason,
+            },
             "case_slots": [slot_to_dict(slot) for slot in slots],
             "missing_slots": [slot_to_dict(slot) for slot in slots if slot.required and slot.status == "missing"],
             "memory_updates": list(state.get("memory_updates") or []) + memory_updates,
@@ -364,8 +375,11 @@ def build_langchain_policy_prompt(state: PolicyAgentState) -> str:
         )
 
     template = PromptTemplate.from_template(
-        "请基于以下政策片段回答问题。必须区分“政策依据”和“AI 推断”；"
-        "如果片段不足以支持结论，要明确说明不确定。\n\n"
+        "请基于以下政策片段回答问题。输出必须包含两个一级小节：\n"
+        "1. 政策依据：只写政策片段能直接支持的条款、条件、材料、流程或出处。\n"
+        "2. AI 推断：只写基于政策依据和用户条件得到的判断、仍需补充的信息、下一步建议。\n"
+        "如果片段不足以支持结论，要在 AI 推断中明确说明不确定点，不要把不确定点写成政策依据。\n"
+        "不要把“政策依据”或“AI 推断”标题重复多次。\n\n"
         "用户问题：{question}\n\n"
         "政策片段：\n{contexts}\n\n"
         "Agent 编排上下文：\n{agent_context}\n"

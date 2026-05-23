@@ -88,8 +88,11 @@ type AgentGraphNode = {
   input_keys: string[] | Record<string, unknown> | null;
   output_keys: string[] | Record<string, unknown> | null;
   enabled: boolean;
+  call_count: number;
   average_duration_ms: number | null;
   failure_count: number;
+  last_failure_message: string | null;
+  last_failure_at: string | null;
 };
 
 type AgentGraphEdge = {
@@ -431,6 +434,7 @@ export default function AdminPage() {
               <span className="font-medium text-foreground">{agentGraph?.version ?? "未加载"}</span>
               <span>{agentGraph?.description ?? "暂无 Agent 编排信息"}</span>
             </div>
+            <AgentFlowDiagram graph={agentGraph} selectedSteps={agentRunDetail?.steps ?? []} />
             <div className="grid gap-3 md:grid-cols-2">
               {(agentGraph?.nodes ?? []).map((node) => (
                 <div key={node.id} className="rounded-lg border border-border bg-background p-3">
@@ -446,16 +450,28 @@ export default function AdminPage() {
                     </span>
                   </div>
                   <div className="mt-3 flex flex-wrap gap-2 text-xs text-muted-foreground">
+                    <span>调用 {node.call_count}</span>
                     <span>平均 {node.average_duration_ms ?? 0}ms</span>
                     <span>失败 {node.failure_count}</span>
                     <span>{node.enabled ? "启用" : "停用"}</span>
                   </div>
+                  <details className="mt-3 text-xs text-muted-foreground">
+                    <summary className="cursor-pointer text-foreground">输入/输出字段</summary>
+                    <p className="mt-2">输入：{formatKeys(node.input_keys)}</p>
+                    <p className="mt-1">输出：{formatKeys(node.output_keys)}</p>
+                    {node.last_failure_message ? (
+                      <p className="mt-1 text-red-600">
+                        最近失败：{node.last_failure_message}
+                      </p>
+                    ) : null}
+                  </details>
                 </div>
               ))}
               {!agentGraph?.nodes.length ? (
                 <p className="text-sm text-muted-foreground">暂无 Agent 节点信息</p>
               ) : null}
             </div>
+            <AgentGovernanceTable nodes={agentGraph?.nodes ?? []} />
           </div>
 
           <div className="space-y-4">
@@ -515,9 +531,19 @@ export default function AdminPage() {
 
             <div className="rounded-lg border border-border">
               <div className="border-b border-border px-3 py-2 text-sm font-medium text-foreground">
-                执行步骤
+                运行详情
               </div>
               <div className="max-h-96 divide-y divide-border overflow-auto">
+                {agentRunDetail ? (
+                  <div className="px-3 py-3">
+                    <p className="line-clamp-2 text-sm font-medium leading-6 text-foreground">
+                      {agentRunDetail.run.question}
+                    </p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {agentRunDetail.run.intent ?? "unknown"} / {agentRunDetail.run.case_type ?? "general"} / {agentRunDetail.run.risk_level ?? "未评估"} / {agentRunDetail.run.duration_ms ?? 0}ms
+                    </p>
+                  </div>
+                ) : null}
                 {(agentRunDetail?.steps ?? []).map((step) => (
                   <div key={step.id} className="px-3 py-3">
                     <div className="flex items-center justify-between gap-3">
@@ -529,6 +555,12 @@ export default function AdminPage() {
                     <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">
                       {step.output_summary ?? step.error_message ?? step.input_summary ?? "无摘要"}
                     </p>
+                    <details className="mt-2 text-xs leading-5 text-muted-foreground">
+                      <summary className="cursor-pointer text-foreground">查看输入/输出摘要</summary>
+                      <p className="mt-2 break-words">输入：{step.input_summary ?? "无"}</p>
+                      <p className="mt-1 break-words">输出：{step.output_summary ?? "无"}</p>
+                      {step.error_message ? <p className="mt-1 text-red-600">错误：{step.error_message}</p> : null}
+                    </details>
                   </div>
                 ))}
                 {!agentRunDetail?.steps.length ? (
@@ -740,6 +772,119 @@ export default function AdminPage() {
   );
 }
 
+function AgentFlowDiagram({
+  graph,
+  selectedSteps,
+}: {
+  graph: AgentGraph | null;
+  selectedSteps: AgentStepLog[];
+}) {
+  const executed = new Set(selectedSteps.map((step) => step.node_key));
+  const failed = new Set(selectedSteps.filter((step) => step.status === "failed").map((step) => step.node_key));
+
+  if (!graph?.nodes.length) {
+    return (
+      <div className="rounded-lg border border-dashed border-border bg-background p-4 text-sm text-muted-foreground">
+        暂无可视化 Agent 图。
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-lg border border-border bg-background p-4">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <div>
+          <p className="text-sm font-medium text-foreground">多 Agent 状态图</p>
+          <p className="text-xs text-muted-foreground">按 LangGraph 编排顺序展示节点、路由和最近运行命中情况。</p>
+        </div>
+        <div className="flex shrink-0 flex-wrap gap-2 text-xs text-muted-foreground">
+          <span className="rounded-md bg-emerald-50 px-2 py-1 text-emerald-700">已执行</span>
+          <span className="rounded-md bg-red-50 px-2 py-1 text-red-700">失败</span>
+          <span className="rounded-md bg-muted px-2 py-1">未命中</span>
+        </div>
+      </div>
+      <div className="grid gap-2 md:grid-cols-3 xl:grid-cols-4">
+        {graph.nodes.map((node, index) => (
+          <div
+            key={node.id}
+            className={`min-h-24 rounded-lg border p-3 ${
+              failed.has(node.id)
+                ? "border-red-200 bg-red-50"
+                : executed.has(node.id)
+                  ? "border-emerald-200 bg-emerald-50"
+                  : "border-border bg-muted/30"
+            }`}
+          >
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <span className="rounded-md bg-background px-2 py-1 text-xs text-muted-foreground">
+                {String(index + 1).padStart(2, "0")}
+              </span>
+              <span className="rounded-md bg-background px-2 py-1 text-xs text-muted-foreground">
+                {node.type}
+              </span>
+            </div>
+            <p className="truncate text-sm font-medium text-foreground">{node.label}</p>
+            <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">{node.description}</p>
+          </div>
+        ))}
+      </div>
+      <div className="mt-4 max-h-32 overflow-auto rounded-md border border-border bg-muted/20 p-3">
+        <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+          {graph.edges.map((edge, index) => (
+            <span key={`${edge.source}-${edge.target}-${index}`} className="rounded-md bg-background px-2 py-1">
+              {edge.source} → {edge.target}
+              {edge.condition ? ` · ${edge.condition}` : ""}
+            </span>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AgentGovernanceTable({ nodes }: { nodes: AgentGraphNode[] }) {
+  if (!nodes.length) {
+    return null;
+  }
+
+  return (
+    <div className="overflow-hidden rounded-lg border border-border bg-background">
+      <div className="border-b border-border px-3 py-2 text-sm font-medium text-foreground">
+        节点治理统计
+      </div>
+      <table className="w-full table-fixed border-collapse text-left text-xs">
+        <thead className="bg-muted/70 text-muted-foreground">
+          <tr>
+            <th className="w-[22%] px-3 py-2 font-medium">节点</th>
+            <th className="w-[12%] px-3 py-2 font-medium">类型</th>
+            <th className="w-[18%] px-3 py-2 font-medium">调用</th>
+            <th className="w-[24%] px-3 py-2 font-medium">输入</th>
+            <th className="w-[24%] px-3 py-2 font-medium">输出</th>
+          </tr>
+        </thead>
+        <tbody>
+          {nodes.map((node) => (
+            <tr key={node.id} className="border-t border-border align-top">
+              <td className="px-3 py-2">
+                <p className="font-medium text-foreground">{node.label}</p>
+                <p className="mt-1 text-muted-foreground">{node.enabled ? "启用" : "停用"}</p>
+              </td>
+              <td className="px-3 py-2 text-muted-foreground">{node.type}</td>
+              <td className="px-3 py-2 text-muted-foreground">
+                <p>{node.call_count} 次</p>
+                <p>平均 {node.average_duration_ms ?? 0}ms</p>
+                <p className={node.failure_count ? "text-red-600" : ""}>失败 {node.failure_count}</p>
+              </td>
+              <td className="px-3 py-2 text-muted-foreground">{formatKeys(node.input_keys)}</td>
+              <td className="px-3 py-2 text-muted-foreground">{formatKeys(node.output_keys)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function DocumentRow({
   document,
   loading,
@@ -926,6 +1071,16 @@ function formObject(formData: FormData) {
 function emptyToNull(value: FormDataEntryValue | null) {
   const text = String(value ?? "").trim();
   return text ? text : null;
+}
+
+function formatKeys(value: string[] | Record<string, unknown> | null) {
+  if (!value) {
+    return "无";
+  }
+  if (Array.isArray(value)) {
+    return value.join("、") || "无";
+  }
+  return Object.keys(value).join("、") || "无";
 }
 
 function formatDateTime(value: string) {

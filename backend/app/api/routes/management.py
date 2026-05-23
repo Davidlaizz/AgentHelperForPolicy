@@ -300,6 +300,10 @@ def count_high_risk_answers(db: Session) -> int:
 
 
 def agent_node_response(db: Session, item: dict) -> AgentGraphNodeResponse:
+    call_count = scalar_count(
+        db,
+        select(func.count(AgentStepLog.id)).where(AgentStepLog.node_key == item["id"]),
+    )
     avg_duration = db.execute(
         select(func.avg(AgentStepLog.duration_ms)).where(
             AgentStepLog.node_key == item["id"],
@@ -313,6 +317,15 @@ def agent_node_response(db: Session, item: dict) -> AgentGraphNodeResponse:
             AgentStepLog.status == "failed",
         ),
     )
+    last_failure = db.execute(
+        select(AgentStepLog)
+        .where(
+            AgentStepLog.node_key == item["id"],
+            AgentStepLog.status == "failed",
+        )
+        .order_by(AgentStepLog.started_at.desc())
+        .limit(1)
+    ).scalar_one_or_none()
     return AgentGraphNodeResponse(
         id=item["id"],
         label=item["label"],
@@ -321,8 +334,11 @@ def agent_node_response(db: Session, item: dict) -> AgentGraphNodeResponse:
         input_keys=item.get("input_keys"),
         output_keys=item.get("output_keys"),
         enabled=True,
+        call_count=call_count,
         average_duration_ms=int(avg_duration or 0) if avg_duration is not None else None,
         failure_count=failure_count,
+        last_failure_message=last_failure.error_message if last_failure else None,
+        last_failure_at=last_failure.started_at if last_failure else None,
     )
 
 

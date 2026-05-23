@@ -1197,20 +1197,20 @@ frontend/src/components/agent-graph/
 6. `npm run build` 通过。
 7. 奖学金、转专业、毕业流程三条演示问题均生成完整 Agent 运行轨迹。
 
-### 19.4 下一轮 P1 任务：Agent 智能化增强
+### 19.4 P1 任务：Agent 智能化增强
 
 目标：从“规则复用型多 Agent”升级为“部分结构化智能 Agent”。
 
-当前状态：已完成第一版证据分层与风险提示增强，详见 [docs/v1.1-langgraph-p1-agent-enhancement.md](D:\woskspace\AgentHelper\docs\v1.1-langgraph-p1-agent-enhancement.md)。
+当前状态：已完成第一版，详见 [docs/v1.1-langgraph-p1-p2-completion.md](D:\woskspace\AgentHelper\docs\v1.1-langgraph-p1-p2-completion.md)。
 
 任务：
 
-1. 使用 LangChain structured output 增强 `IntentAgent`。
-2. 使用 LangChain structured output 增强 `SlotAgent`。
+1. 使用 LangChain structured output 增强 `IntentAgent`。（已完成第一版）
+2. 使用 LangChain structured output 增强 `SlotAgent`。（已完成第一版）
 3. 为 `EvidenceAgent` 增加更清晰的证据分层：学校通用政策、学院细则、年度通知、附件材料、已过期政策。（已完成第一版）
 4. 为 `RiskAgent` 增加冲突检测规则：学校政策与学院政策冲突、正文与附件不一致、新旧版本政策冲突、缺少生效时间。（已完成缺少生效时间、过期政策、学校/学院层级混合、附件证据提示第一版）
-5. 增加 Agent 输出结构校验，避免某个节点返回不完整状态。
-6. 梳理 `AnswerAgent` prompt，使其更明确地区分政策原文依据、用户条件判断、AI 推断、不确定事项和下一步建议。
+5. 增加 Agent 输出结构校验，避免某个节点返回不完整状态。（已完成第一版）
+6. 梳理 `AnswerAgent` prompt，使其更明确地区分政策原文依据、用户条件判断、AI 推断、不确定事项和下一步建议。（已完成第一版）
 
 验收标准：
 
@@ -1224,19 +1224,23 @@ frontend/src/components/agent-graph/
 2. `RiskAgent` 已基于证据摘要补充有效期、过期政策、学校/学院层级混合和附件证据风险提示。
 3. `AgentResponse` 已暴露 `evidence_summary`。
 4. 问答页 Agent 面板已展示“证据分层”。
-5. `python -m compileall app`、`m6_smoke_test.py`、`m7_smoke_test.py`、`npm run lint`、`npm run build` 均通过。
+5. `IntentAgent` 和 `SlotAgent` 已引入 LangChain `PydanticOutputParser`，支持 structured output 和规则兜底。
+6. Agent 节点 wrapper 已增加输出字段校验。
+7. `python -m compileall app`、`m6_smoke_test.py`、`m7_smoke_test.py`、`npm run lint`、`npm run build` 均通过。
 
-### 19.5 下一轮 P2 任务：后台可视化与治理能力
+### 19.5 P2 任务：后台可视化与治理能力
 
 目标：让管理后台更像“智能体治理平台”，提升比赛表达力。
 
+当前状态：已完成第一版，详见 [docs/v1.1-langgraph-p1-p2-completion.md](D:\woskspace\AgentHelper\docs\v1.1-langgraph-p1-p2-completion.md)。
+
 任务：
 
-1. 将当前卡片式 Agent 图升级为更直观的流程图。
-2. 可选技术：第一阶段 Mermaid 静态图，第二阶段 React Flow 交互图。
-3. 增加单次运行详情弹窗或独立页面。
-4. 增加 Agent 节点统计：调用次数、平均耗时、失败次数、最近失败原因。
-5. 增加 Agent 配置展示：节点是否启用、节点类型、输入字段、输出字段。
+1. 将当前卡片式 Agent 图升级为更直观的流程图。（已完成第一版）
+2. 可选技术：第一阶段 Mermaid 静态图，第二阶段 React Flow 交互图。（已采用轻量前端状态图第一版）
+3. 增加单次运行详情弹窗或独立页面。（已完成运行详情面板第一版）
+4. 增加 Agent 节点统计：调用次数、平均耗时、失败次数、最近失败原因。（已完成第一版）
+5. 增加 Agent 配置展示：节点是否启用、节点类型、输入字段、输出字段。（已完成第一版）
 6. 后续可扩展为在线配置：节点启停、Prompt 编辑、路由规则说明、日志保留周期。
 
 验收标准：
@@ -1244,6 +1248,13 @@ frontend/src/components/agent-graph/
 1. 管理后台能承担路演中的“技术架构展示页”作用。
 2. 非技术评委能看懂系统为什么不是普通 RAG 问答。
 3. 技术评委能看到 Agent 状态图、运行日志和治理闭环。
+
+已完成验收记录：
+
+1. `/admin` 已展示多 Agent 状态图、条件路由、最近运行和运行详情。
+2. 节点卡片和节点治理统计表已展示调用次数、平均耗时、失败次数、输入字段、输出字段。
+3. 后端管理接口已返回 `call_count`、`last_failure_message`、`last_failure_at` 等治理字段。
+4. `npm run lint` 和 `npm run build` 均通过。
 
 ### 19.6 下一轮 P3 任务：多场景扩展准备
 
