@@ -140,6 +140,11 @@ type AgentRunDetail = {
   steps: AgentStepLog[];
 };
 
+type GraphSelection =
+  | { kind: "node"; id: string }
+  | { kind: "edge"; id: string }
+  | null;
+
 const apiBaseUrl =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000";
 
@@ -159,6 +164,22 @@ const statusClassName: Record<PolicyDocument["parse_status"], string> = {
   failed: "border-red-200 bg-red-50 text-red-700",
 };
 
+const flowLayers = [
+  { title: "入口", nodes: ["memory_read"] },
+  { title: "理解", nodes: ["intent", "case", "slot"] },
+  { title: "知识", nodes: ["retrieval", "evidence"] },
+  { title: "分支", nodes: ["followup", "eligibility", "workflow", "risk"] },
+  { title: "生成", nodes: ["answer", "memory_write"] },
+];
+
+const conditionLabels: Record<string, string> = {
+  always: "固定流转",
+  missing_slots: "存在缺失条件",
+  eligibility_check: "资格判断",
+  workflow_or_material: "流程或材料",
+  policy_qa_or_general: "普通问答",
+};
+
 export default function AdminPage() {
   const [documents, setDocuments] = useState<PolicyDocument[]>([]);
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
@@ -173,11 +194,30 @@ export default function AdminPage() {
   const [autoParse, setAutoParse] = useState(true);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
+  const [graphSelection, setGraphSelection] = useState<GraphSelection>({ kind: "node", id: "memory_read" });
 
   const mainDocuments = useMemo(
     () => documents.filter((document) => !document.is_attachment && document.is_active),
     [documents],
   );
+  const selectedNode = useMemo(() => {
+    if (graphSelection?.kind !== "node") {
+      return null;
+    }
+    return agentGraph?.nodes.find((node) => node.id === graphSelection.id) ?? null;
+  }, [agentGraph?.nodes, graphSelection]);
+  const selectedEdge = useMemo(() => {
+    if (graphSelection?.kind !== "edge") {
+      return null;
+    }
+    return agentGraph?.edges.find((edge, index) => edgeKey(edge, index) === graphSelection.id) ?? null;
+  }, [agentGraph?.edges, graphSelection]);
+  const selectedStep = useMemo(() => {
+    if (!selectedNode) {
+      return null;
+    }
+    return agentRunDetail?.steps.find((step) => step.node_key === selectedNode.id) ?? null;
+  }, [agentRunDetail?.steps, selectedNode]);
 
   const loadAgentRunDetail = useCallback(async (runId: string) => {
     const response = await fetch(`${apiBaseUrl}/api/management/agent-runs/${runId}`, { cache: "no-store" });
@@ -434,7 +474,12 @@ export default function AdminPage() {
               <span className="font-medium text-foreground">{agentGraph?.version ?? "未加载"}</span>
               <span>{agentGraph?.description ?? "暂无 Agent 编排信息"}</span>
             </div>
-            <AgentFlowDiagram graph={agentGraph} selectedSteps={agentRunDetail?.steps ?? []} />
+            <AgentFlowDiagram
+              graph={agentGraph}
+              selectedSteps={agentRunDetail?.steps ?? []}
+              selection={graphSelection}
+              onSelect={setGraphSelection}
+            />
             <div className="grid gap-3 md:grid-cols-2">
               {(agentGraph?.nodes ?? []).map((node) => (
                 <div key={node.id} className="rounded-lg border border-border bg-background p-3">
@@ -475,24 +520,11 @@ export default function AdminPage() {
           </div>
 
           <div className="space-y-4">
-            <div className="rounded-lg border border-border">
-              <div className="border-b border-border px-3 py-2 text-sm font-medium text-foreground">
-                条件路由
-              </div>
-              <div className="max-h-72 overflow-auto p-3">
-                <div className="space-y-2">
-                  {(agentGraph?.edges ?? []).map((edge, index) => (
-                    <div key={`${edge.source}-${edge.target}-${index}`} className="flex items-center gap-2 text-xs text-muted-foreground">
-                      <span className="rounded-md bg-muted px-2 py-1 text-foreground">{edge.source}</span>
-                      <span>→</span>
-                      <span className="rounded-md bg-muted px-2 py-1 text-foreground">{edge.target}</span>
-                      <span className="truncate">{edge.condition ?? "always"}</span>
-                    </div>
-                  ))}
-                  {!agentGraph?.edges.length ? <p className="text-sm text-muted-foreground">暂无路由信息</p> : null}
-                </div>
-              </div>
-            </div>
+            <GraphSelectionPanel
+              node={selectedNode}
+              edge={selectedEdge}
+              step={selectedStep}
+            />
 
             <div className="rounded-lg border border-border">
               <div className="border-b border-border px-3 py-2 text-sm font-medium text-foreground">
@@ -775,12 +807,17 @@ export default function AdminPage() {
 function AgentFlowDiagram({
   graph,
   selectedSteps,
+  selection,
+  onSelect,
 }: {
   graph: AgentGraph | null;
   selectedSteps: AgentStepLog[];
+  selection: GraphSelection;
+  onSelect: (selection: GraphSelection) => void;
 }) {
   const executed = new Set(selectedSteps.map((step) => step.node_key));
   const failed = new Set(selectedSteps.filter((step) => step.status === "failed").map((step) => step.node_key));
+  const nodeById = new Map((graph?.nodes ?? []).map((node) => [node.id, node]));
 
   if (!graph?.nodes.length) {
     return (
@@ -803,41 +840,232 @@ function AgentFlowDiagram({
           <span className="rounded-md bg-muted px-2 py-1">未命中</span>
         </div>
       </div>
-      <div className="grid gap-2 md:grid-cols-3 xl:grid-cols-4">
-        {graph.nodes.map((node, index) => (
-          <div
-            key={node.id}
-            className={`min-h-24 rounded-lg border p-3 ${
-              failed.has(node.id)
-                ? "border-red-200 bg-red-50"
-                : executed.has(node.id)
-                  ? "border-emerald-200 bg-emerald-50"
-                  : "border-border bg-muted/30"
-            }`}
-          >
-            <div className="mb-2 flex items-center justify-between gap-2">
-              <span className="rounded-md bg-background px-2 py-1 text-xs text-muted-foreground">
-                {String(index + 1).padStart(2, "0")}
+      <div className="space-y-3">
+        <div className="flex justify-center">
+          <FlowTerminus label="Start" />
+        </div>
+        {flowLayers.map((layer, layerIndex) => (
+          <div key={layer.title} className="space-y-2">
+            <div className="flex items-center gap-2">
+              <span className="rounded-md bg-muted px-2 py-1 text-xs font-medium text-foreground">
+                {layer.title}
               </span>
-              <span className="rounded-md bg-background px-2 py-1 text-xs text-muted-foreground">
-                {node.type}
-              </span>
+              <div className="h-px flex-1 bg-border" />
             </div>
-            <p className="truncate text-sm font-medium text-foreground">{node.label}</p>
-            <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">{node.description}</p>
+            <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+              {layer.nodes.map((nodeId) => {
+                const node = nodeById.get(nodeId);
+                if (!node) {
+                  return null;
+                }
+                return (
+                  <FlowNodeButton
+                    key={node.id}
+                    node={node}
+                    active={selection?.kind === "node" && selection.id === node.id}
+                    executed={executed.has(node.id)}
+                    failed={failed.has(node.id)}
+                    onClick={() => onSelect({ kind: "node", id: node.id })}
+                  />
+                );
+              })}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {edgesForLayer(graph.edges, layer.nodes, layerIndex).map((edge) => {
+                const key = edgeKey(edge.edge, edge.index);
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => onSelect({ kind: "edge", id: key })}
+                    className={`rounded-md border px-2 py-1 text-left text-xs transition ${
+                      selection?.kind === "edge" && selection.id === key
+                        ? "border-primary bg-primary/10 text-primary"
+                        : "border-border bg-background text-muted-foreground hover:border-primary/50"
+                    }`}
+                  >
+                    {edge.edge.source} → {edge.edge.target} · {conditionText(edge.edge.condition)}
+                  </button>
+                );
+              })}
+            </div>
           </div>
         ))}
-      </div>
-      <div className="mt-4 max-h-32 overflow-auto rounded-md border border-border bg-muted/20 p-3">
-        <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-          {graph.edges.map((edge, index) => (
-            <span key={`${edge.source}-${edge.target}-${index}`} className="rounded-md bg-background px-2 py-1">
-              {edge.source} → {edge.target}
-              {edge.condition ? ` · ${edge.condition}` : ""}
-            </span>
-          ))}
+        <div className="flex justify-center">
+          <FlowTerminus label="End" />
         </div>
       </div>
+    </div>
+  );
+}
+
+function FlowNodeButton({
+  node,
+  active,
+  executed,
+  failed,
+  onClick,
+}: {
+  node: AgentGraphNode;
+  active: boolean;
+  executed: boolean;
+  failed: boolean;
+  onClick: () => void;
+}) {
+  const stateClass = failed
+    ? "border-red-200 bg-red-50"
+    : executed
+      ? "border-emerald-200 bg-emerald-50"
+      : "border-border bg-muted/30";
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`min-h-28 rounded-lg border p-3 text-left transition hover:border-primary/50 ${
+        active ? "ring-2 ring-primary/40" : ""
+      } ${stateClass}`}
+    >
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <span className="rounded-md bg-background px-2 py-1 text-xs text-muted-foreground">
+          {node.type}
+        </span>
+        <span className="rounded-md bg-background px-2 py-1 text-xs text-muted-foreground">
+          {executed ? "已执行" : "未命中"}
+        </span>
+      </div>
+      <p className="truncate text-sm font-medium text-foreground">{node.label}</p>
+      <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">{node.description}</p>
+      <div className="mt-2 flex flex-wrap gap-2 text-xs text-muted-foreground">
+        <span>入 {countKeys(node.input_keys)}</span>
+        <span>出 {countKeys(node.output_keys)}</span>
+        <span>{node.average_duration_ms ?? 0}ms</span>
+      </div>
+    </button>
+  );
+}
+
+function FlowTerminus({ label }: { label: string }) {
+  return (
+    <div className="rounded-full border border-border bg-muted px-4 py-1 text-xs font-medium text-muted-foreground">
+      {label}
+    </div>
+  );
+}
+
+function GraphSelectionPanel({
+  node,
+  edge,
+  step,
+}: {
+  node: AgentGraphNode | null;
+  edge: AgentGraphEdge | null;
+  step: AgentStepLog | null;
+}) {
+  return (
+    <div className="rounded-lg border border-border bg-background">
+      <div className="border-b border-border px-3 py-2 text-sm font-medium text-foreground">
+        编排详情
+      </div>
+      <div className="space-y-4 p-3">
+        {node ? (
+          <>
+            <div>
+              <div className="mb-2 flex flex-wrap items-center gap-2">
+                <span className="text-sm font-medium text-foreground">{node.label}</span>
+                <span className="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">{node.type}</span>
+                <span className="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
+                  {node.enabled ? "启用" : "停用"}
+                </span>
+              </div>
+              <p className="text-xs leading-5 text-muted-foreground">{node.description}</p>
+            </div>
+            <KeyList title="入参" value={node.input_keys} />
+            <KeyList title="出参" value={node.output_keys} />
+            <div className="grid grid-cols-3 gap-2 text-xs">
+              <MetricMini label="调用" value={`${node.call_count}`} />
+              <MetricMini label="平均耗时" value={`${node.average_duration_ms ?? 0}ms`} />
+              <MetricMini label="失败" value={`${node.failure_count}`} danger={node.failure_count > 0} />
+            </div>
+            <RuntimeSummary step={step} />
+            {node.last_failure_message ? (
+              <div className="rounded-md border border-red-200 bg-red-50 p-3 text-xs leading-5 text-red-700">
+                最近失败：{node.last_failure_message}
+              </div>
+            ) : null}
+          </>
+        ) : edge ? (
+          <>
+            <div>
+              <p className="text-sm font-medium text-foreground">
+                {edge.source} → {edge.target}
+              </p>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                {conditionExplanation(edge.condition)}
+              </p>
+            </div>
+            <div className="grid gap-2 text-xs text-muted-foreground">
+              <p>条件：{edge.condition ?? "always"}（{conditionText(edge.condition)}）</p>
+              <p>表达式：{edge.condition_expression ?? "无"}</p>
+              <p>源节点：{edge.source}</p>
+              <p>目标节点：{edge.target}</p>
+            </div>
+          </>
+        ) : (
+          <p className="text-sm text-muted-foreground">请选择一个节点或一条边查看详情。</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function KeyList({ title, value }: { title: string; value: string[] | Record<string, unknown> | null }) {
+  const keys = keyArray(value);
+  return (
+    <div>
+      <p className="mb-2 text-xs font-medium text-foreground">{title}</p>
+      <div className="flex flex-wrap gap-1.5">
+        {keys.length ? (
+          keys.map((key) => (
+            <span key={key} className="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
+              {key}
+            </span>
+          ))
+        ) : (
+          <span className="text-xs text-muted-foreground">无</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function MetricMini({ label, value, danger }: { label: string; value: string; danger?: boolean }) {
+  return (
+    <div className="rounded-md border border-border bg-muted/30 p-2">
+      <p className="text-muted-foreground">{label}</p>
+      <p className={danger ? "mt-1 font-medium text-red-600" : "mt-1 font-medium text-foreground"}>{value}</p>
+    </div>
+  );
+}
+
+function RuntimeSummary({ step }: { step: AgentStepLog | null }) {
+  if (!step) {
+    return (
+      <div className="rounded-md border border-dashed border-border p-3 text-xs text-muted-foreground">
+        当前选中运行未经过该节点。
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-md border border-border bg-muted/20 p-3 text-xs leading-5 text-muted-foreground">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <span className="font-medium text-foreground">最近运行摘要</span>
+        <span>{step.status} / {step.duration_ms ?? 0}ms</span>
+      </div>
+      <p className="break-words">输入：{step.input_summary ?? "无"}</p>
+      <p className="mt-1 break-words">输出：{step.output_summary ?? "无"}</p>
+      {step.error_message ? <p className="mt-1 text-red-600">错误：{step.error_message}</p> : null}
     </div>
   );
 }
@@ -1074,13 +1302,44 @@ function emptyToNull(value: FormDataEntryValue | null) {
 }
 
 function formatKeys(value: string[] | Record<string, unknown> | null) {
+  return keyArray(value).join("、") || "无";
+}
+
+function keyArray(value: string[] | Record<string, unknown> | null) {
   if (!value) {
-    return "无";
+    return [];
   }
-  if (Array.isArray(value)) {
-    return value.join("、") || "无";
-  }
-  return Object.keys(value).join("、") || "无";
+  return Array.isArray(value) ? value : Object.keys(value);
+}
+
+function countKeys(value: string[] | Record<string, unknown> | null) {
+  return keyArray(value).length;
+}
+
+function edgeKey(edge: AgentGraphEdge, index: number) {
+  return `${edge.source}-${edge.target}-${edge.condition ?? "always"}-${index}`;
+}
+
+function edgesForLayer(edges: AgentGraphEdge[], nodeIds: string[], layerIndex: number) {
+  return edges
+    .map((edge, index) => ({ edge, index }))
+    .filter(({ edge }) => nodeIds.includes(edge.source) || (layerIndex === 0 && edge.source === "start"));
+}
+
+function conditionText(condition: string | null) {
+  return conditionLabels[condition ?? "always"] ?? condition ?? "固定流转";
+}
+
+function conditionExplanation(condition: string | null) {
+  const key = condition ?? "always";
+  const descriptions: Record<string, string> = {
+    always: "该边为固定流转，源节点执行成功后直接进入目标节点。",
+    missing_slots: "当 SlotAgent 发现必要条件缺失时，EvidenceAgent 后进入 FollowupAgent 生成追问。",
+    eligibility_check: "当用户意图是资格判断，且关键条件足够时，进入 EligibilityAgent 做资格初判。",
+    workflow_or_material: "当用户需要办理流程或材料清单时，进入 WorkflowAgent 抽取材料和步骤。",
+    policy_qa_or_general: "普通政策问答或一般咨询会跳过资格/流程分支，直接进入风险校验。",
+  };
+  return descriptions[key] ?? "该条件由 LangGraph 路由规则控制。";
 }
 
 function formatDateTime(value: string) {
