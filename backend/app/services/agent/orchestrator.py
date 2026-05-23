@@ -347,6 +347,42 @@ def build_eligibility_record(
         matched.append(f"已提供绩点：{values['gpa']}")
     if values.get("rank_percent") is not None:
         matched.append(f"已提供排名比例：前 {values['rank_percent']}%")
+    if values.get("difficulty_level") is not None:
+        matched.append(f"已提供困难认定/家庭经济情况：{values['difficulty_level']}")
+    if values.get("has_difficulty_identification") is True:
+        matched.append("已完成家庭经济困难认定")
+    elif values.get("has_difficulty_identification") is False:
+        unmet.append("尚未完成家庭经济困难认定")
+    if values.get("english_score") is not None:
+        matched.append(f"已提供英语成绩：{values['english_score']}")
+    if values.get("research_awards") is not None:
+        matched.append(f"已提供科研竞赛情况：{values['research_awards']}")
+    if values.get("credits_completed") is True:
+        matched.append("已修满或自述已满足毕业学分")
+    elif values.get("credits_completed") is False:
+        unmet.append("存在未修满毕业学分风险")
+    if values.get("thesis_status") is not None:
+        matched.append(f"已提供毕设/论文状态：{values['thesis_status']}")
+        if "未通过" in str(values["thesis_status"]):
+            unmet.append("毕设/论文存在未通过风险")
+    if values.get("cet4_qualified") is True:
+        matched.append("已满足或自述满足外语/四级条件")
+    elif values.get("cet4_qualified") is False:
+        unmet.append("外语/四级条件存在不满足风险")
+    if values.get("leave_type") is not None:
+        matched.append(f"已提供请假/异动类型：{values['leave_type']}")
+    if values.get("leave_days") is not None:
+        matched.append(f"已提供请假/异动时长：{values['leave_days']}")
+    if values.get("has_supporting_material") is True:
+        matched.append("已准备证明材料")
+    elif values.get("has_supporting_material") is False:
+        unmet.append("证明材料尚不完整")
+    if values.get("violation_type") is not None:
+        matched.append(f"已提供违纪类型：{values['violation_type']}")
+    if values.get("process_stage") is not None:
+        matched.append(f"已提供处理阶段：{values['process_stage']}")
+    if values.get("status_action") is not None:
+        matched.append(f"已提供学籍事项：{values['status_action']}")
 
     if unmet:
         result_status = "not_eligible"
@@ -400,6 +436,12 @@ def build_risk(
     if "不确定" in answer or "无法" in answer:
         warnings.append("回答中包含不确定性提示，需要人工复核关键结论。")
         risk_level = "medium" if risk_level == "low" else risk_level
+    if state.case_type in {"discipline", "postgraduate_recommendation", "graduation"}:
+        warnings.append("该事项会影响处分、推免或毕业学位等高影响结果，建议由学院或主管部门复核。")
+        if state.case_type == "discipline":
+            risk_level = "high"
+        elif risk_level == "low":
+            risk_level = "medium"
 
     today = date.today()
     expired_titles = [

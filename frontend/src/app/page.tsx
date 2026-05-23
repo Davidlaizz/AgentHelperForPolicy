@@ -43,7 +43,7 @@ const quickEntries = [
 const caseCards = [
   { title: "奖学金", desc: "挂科、排名、综合测评与评奖资格", tone: "bg-blue-50 text-blue-800" },
   { title: "转专业", desc: "年级、绩点、挂科、目标专业与申请批次", tone: "bg-emerald-50 text-emerald-800" },
-  { title: "毕业论文", desc: "校外做论文、盲审、答辩与申请表", tone: "bg-amber-50 text-amber-800" },
+  { title: "毕业要求", desc: "毕业审核、学分、学位条件与论文答辩", tone: "bg-amber-50 text-amber-800" },
   { title: "学籍管理", desc: "信息变更、休复学、材料要求", tone: "bg-slate-100 text-slate-800" },
   { title: "保研", desc: "推免规则、排名要求和材料核查", tone: "bg-violet-50 text-violet-800" },
   { title: "请假", desc: "请假流程、审批层级和证明材料", tone: "bg-cyan-50 text-cyan-800" },

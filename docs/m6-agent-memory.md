@@ -36,8 +36,14 @@ general_chat
 ```text
 major_transfer
 scholarship
+grant
+postgraduate_recommendation
 thesis
+graduation
+leave_request
+discipline
 status_change
+student_status
 general_policy
 ```
 
@@ -68,6 +74,66 @@ has_disciplinary_record
 grade
 outside_unit
 has_acceptance_letter
+```
+
+助学金事项 slots：
+
+```text
+grade
+difficulty_level
+has_difficulty_identification
+material_status
+application_period
+```
+
+保研事项 slots：
+
+```text
+grade
+rank_percent
+gpa
+english_score
+research_awards
+has_failed_course
+has_disciplinary_record
+```
+
+毕业与学位事项 slots：
+
+```text
+grade
+credits_completed
+thesis_status
+cet4_qualified
+has_disciplinary_record
+```
+
+请假/休复学事项 slots：
+
+```text
+grade
+leave_type
+leave_days
+has_supporting_material
+leave_off_campus
+```
+
+处分事项 slots：
+
+```text
+violation_type
+process_stage
+appeal_intent
+impact_focus
+```
+
+学籍管理事项 slots：
+
+```text
+grade
+status_action
+has_supporting_material
+college_review_status
 ```
 
 ## 4. 记忆写入
@@ -115,6 +181,8 @@ pending
 - 存在缺失条件：`medium`
 - 回答包含不确定表达：`medium`
 - 检索结果包含可能过期政策：`medium`
+- 保研、毕业等高影响事项默认提示主管部门复核：`medium`
+- 处分事项默认标记为高影响风险：`high`
 
 ## 7. 验证方式
 
@@ -124,10 +192,23 @@ python -m compileall app
 python app/db/m6_smoke_test.py
 ```
 
-已验证两轮转专业资格判断：
+已验证两轮转专业资格判断，并补充 8 类事项识别：
 
 1. 用户问“我能转专业吗？”
 2. Agent 追问年级、绩点、目标专业、挂科、处分、申请时间
 3. 用户补充“大一，绩点 3.6，无挂科，无处分，想转入计算机专业，今年申请”
 4. Agent 复用当前事项，slots 全部变为 `known`
 5. 生成 `likely_eligible` 初步判断并写入 `eligibility_records`
+
+本轮新增的 8 类事项覆盖：
+
+```text
+奖学金 -> scholarship
+助学金 -> grant
+转专业 -> major_transfer
+保研 -> postgraduate_recommendation
+毕业 -> graduation / thesis
+请假 -> leave_request
+处分 -> discipline
+学籍管理 -> student_status / status_change
+```

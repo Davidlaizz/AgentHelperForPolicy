@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import {
   CheckCircle2,
@@ -59,19 +59,74 @@ type ChatResponse = {
 const apiBaseUrl =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000";
 
-const presets = [
-  "我能转专业吗？",
-  "我是大一，绩点 3.6，无挂科，无处分，想转入计算机专业，今年申请",
-  "转专业需要准备哪些材料？",
-];
+const casePresets: Record<string, string[]> = {
+  转专业: [
+    "我能转专业吗？",
+    "我是大一，绩点 3.6，无挂科，无处分，想转入计算机专业，今年申请",
+    "转专业需要准备哪些材料？",
+  ],
+  奖学金: [
+    "我挂过一门课，还能申请奖学金吗？",
+    "我是大二，绩点 3.8，排名前 10%，无挂科，无处分",
+    "奖学金申请需要满足什么条件？",
+  ],
+  助学金: [
+    "家庭经济困难认定后怎么申请国家助学金？",
+    "我是大一，已完成困难认定，材料已准备，今年申请",
+    "助学贷款和绿色通道有什么区别？",
+  ],
+  保研: [
+    "我有一次挂科还能保研吗？",
+    "我是大三，排名前 8%，绩点 3.9，四级 560，无挂科，无处分，有竞赛获奖",
+    "推免资格主要看哪些条件？",
+  ],
+  毕业要求: [
+    "我学分不够会影响毕业吗？",
+    "我是大四，学分不够，论文待答辩，无处分",
+    "四级没过会不会影响学位？",
+  ],
+  请假: [
+    "因病休学需要什么证明？",
+    "我是大二，病假 2 周，已有医院证明，需要离校",
+    "新生不能按时报到请假多久以内有效？",
+  ],
+  处分: [
+    "受到处分会影响保研吗？",
+    "我涉及考试违纪，已处分，想申诉，主要担心保研影响",
+    "处分决定出来后还能申诉吗？",
+  ],
+  学籍管理: [
+    "学籍信息变更需要哪些材料？",
+    "我是大二，要信息变更，证明材料已准备，学院已审核",
+    "累计未通过学分会导致降级吗？",
+  ],
+};
+
+const defaultCase = "转专业";
 
 export default function EligibilityPage() {
-  const [question, setQuestion] = useState(presets[0]);
+  const [selectedCase, setSelectedCase] = useState(defaultCase);
+  const [question, setQuestion] = useState(casePresets[defaultCase][0]);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [responses, setResponses] = useState<ChatResponse[]>([]);
   const [loading, setLoading] = useState(false);
   const current = responses.at(-1);
   const agent = current?.agent;
+  const presets = casePresets[selectedCase] ?? casePresets[defaultCase];
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const nextCase = params.get("case");
+    const nextQuestion = params.get("question");
+    queueMicrotask(() => {
+      if (nextCase && casePresets[nextCase]) {
+        setSelectedCase(nextCase);
+        setQuestion(nextQuestion ?? casePresets[nextCase][0]);
+      } else if (nextQuestion) {
+        setQuestion(nextQuestion);
+      }
+    });
+  }, []);
 
   async function ask(nextQuestion: string) {
     setLoading(true);
@@ -111,6 +166,26 @@ export default function EligibilityPage() {
     <div className="mx-auto grid w-full max-w-7xl flex-1 gap-6 px-4 py-6 lg:grid-cols-[360px_1fr] lg:px-6">
       <aside className="space-y-4">
         <SectionCard title="资格判断" description="用 Agent 追问补齐条件，再给出可复核的初步判断。">
+          <div className="mb-3 grid grid-cols-2 gap-2">
+            {Object.keys(casePresets).map((item) => (
+              <button
+                key={item}
+                type="button"
+                disabled={loading}
+                onClick={() => {
+                  setSelectedCase(item);
+                  setQuestion(casePresets[item][0]);
+                }}
+                className={`h-8 rounded-md border px-2 text-xs ${
+                  selectedCase === item
+                    ? "border-primary bg-primary text-primary-foreground"
+                    : "border-border bg-background text-foreground"
+                }`}
+              >
+                {item}
+              </button>
+            ))}
+          </div>
           <form onSubmit={handleSubmit} className="space-y-3">
             <textarea
               value={question}
