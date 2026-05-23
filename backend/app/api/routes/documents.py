@@ -21,6 +21,9 @@ router = APIRouter(prefix="/documents", tags=["documents"])
 ALLOWED_EXTENSIONS = {
     ".pdf": "pdf",
     ".docx": "docx",
+    ".doc": "doc",
+    ".html": "html",
+    ".htm": "html",
 }
 PARSE_STATUSES = {"uploaded", "parsing", "parsed", "indexed", "failed"}
 
@@ -144,7 +147,7 @@ def disable_document(
 def validate_upload(file: UploadFile) -> str:
     suffix = Path(file.filename or "").suffix.lower()
     if suffix not in ALLOWED_EXTENSIONS:
-        raise HTTPException(status_code=400, detail="仅支持 PDF 和 DOCX 文件")
+        raise HTTPException(status_code=400, detail="仅支持 PDF、DOCX、DOC 和 HTML 文件")
     return ALLOWED_EXTENSIONS[suffix]
 
 

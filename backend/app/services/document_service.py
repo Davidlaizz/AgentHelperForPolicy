@@ -7,7 +7,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.models import PolicyAttachment, PolicyChunk, PolicyDocument
+from app.models import Citation, PolicyAttachment, PolicyChunk, PolicyDocument
 from app.services.document_parser import ParsedSegment, parse_policy_file
 
 
@@ -22,6 +22,7 @@ def parse_document(session: Session, document: PolicyDocument) -> PolicyDocument
             select(PolicyAttachment).where(PolicyAttachment.document_id == document.id)
         ).scalar_one_or_none()
 
+        session.execute(delete(Citation).where(Citation.document_id == document.id))
         session.execute(delete(PolicyChunk).where(PolicyChunk.document_id == document.id))
         for segment in segments:
             session.add(

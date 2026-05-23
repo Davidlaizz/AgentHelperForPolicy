@@ -95,11 +95,12 @@ export default function PoliciesPage() {
           throw new Error("政策文件加载失败");
         }
         const payload: PolicyDocument[] = await response.json();
+        const activeDocuments = payload.filter((document) => document.is_active);
         if (cancelled) {
           return;
         }
-        setDocuments(payload);
-        const firstDocumentId = payload[0]?.id ?? "";
+        setDocuments(activeDocuments);
+        const firstDocumentId = activeDocuments[0]?.id ?? "";
         setSelectedDocumentId(firstDocumentId);
         if (firstDocumentId) {
           const params = new URLSearchParams({

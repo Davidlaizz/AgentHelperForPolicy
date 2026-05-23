@@ -3,7 +3,7 @@ from __future__ import annotations
 from sqlalchemy import delete, select, text
 from sqlalchemy.orm import Session
 
-from app.models import PolicyAttachment, PolicyChunk, PolicyDocument
+from app.models import Citation, PolicyAttachment, PolicyChunk, PolicyDocument
 from app.services.rag.chunker import SourceSegment, build_rag_chunks
 from app.services.rag.llama_index_adapter import build_policy_node, delete_document_nodes, index_nodes
 
@@ -49,6 +49,7 @@ def index_document(session: Session, document: PolicyDocument) -> int:
     )
 
     delete_document_nodes(str(document.id))
+    session.execute(delete(Citation).where(Citation.document_id == document.id))
     session.execute(delete(PolicyChunk).where(PolicyChunk.document_id == document.id))
 
     indexed_chunks: list[PolicyChunk] = []
