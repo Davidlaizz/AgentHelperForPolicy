@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date
 from typing import Any
 
 from langchain_core.prompts import PromptTemplate
@@ -160,16 +161,41 @@ class EvidenceAgent(BaseGraphAgent):
         attachments = []
         expired = []
         levels: dict[str, int] = {}
+        school_level_titles = []
+        college_level_titles = []
+        annual_notice_titles = []
+        unknown_level_titles = []
+        missing_effective_date_titles = []
+        attachment_chunk_count = 0
+        today = date.today()
+
         for item in chunks:
-            if item.get("document_title") not in titles:
-                titles.append(item.get("document_title"))
+            title = item.get("document_title") or "未知政策文件"
+            level = item.get("policy_level") or "未知"
+            effective_from = item.get("effective_from")
+            effective_to = item.get("effective_to")
             metadata = item.get("metadata") or {}
+
+            if title not in titles:
+                titles.append(title)
             if metadata.get("attachment_title") and metadata.get("attachment_title") not in attachments:
                 attachments.append(metadata.get("attachment_title"))
-            if item.get("effective_to"):
-                expired.append(item.get("document_title"))
-            level = item.get("policy_level") or "未知"
+            if item.get("attachment_id") or metadata.get("attachment_title"):
+                attachment_chunk_count += 1
+            if effective_to and effective_to < today:
+                expired.append(title)
+            if not effective_from and not effective_to:
+                missing_effective_date_titles.append(title)
+
             levels[level] = levels.get(level, 0) + 1
+            if level in {"校级", "学校", "学校通用政策"}:
+                school_level_titles.append(title)
+            elif level in {"院级", "学院", "学院细则"}:
+                college_level_titles.append(title)
+            elif level in {"年度通知", "通知", "临时通知"}:
+                annual_notice_titles.append(title)
+            else:
+                unknown_level_titles.append(title)
 
         return {
             "evidence_summary": {
@@ -179,6 +205,12 @@ class EvidenceAgent(BaseGraphAgent):
                 "policy_levels": levels,
                 "has_expired_candidates": bool(expired),
                 "expired_titles": sorted(set(expired))[:5],
+                "school_level_titles": unique_head(school_level_titles, 5),
+                "college_level_titles": unique_head(college_level_titles, 5),
+                "annual_notice_titles": unique_head(annual_notice_titles, 5),
+                "unknown_level_titles": unique_head(unknown_level_titles, 5),
+                "missing_effective_date_titles": unique_head(missing_effective_date_titles, 5),
+                "attachment_only": bool(chunks) and attachment_chunk_count == len(chunks),
             },
             "citations": [
                 {
@@ -245,7 +277,33 @@ class RiskAgent(BaseGraphAgent):
             retrieved=state.get("retrieved_chunks") or [],
             answer=state.get("final_answer") or "",
         )
-        return {"risk": risk.model_dump()}
+        risk_data = risk.model_dump()
+        evidence = state.get("evidence_summary") or {}
+        warnings = list(risk_data.get("warnings") or [])
+        risk_level = risk_data.get("risk_level") or "low"
+
+        if evidence.get("missing_effective_date_titles"):
+            warnings.append(
+                "部分政策缺少明确生效时间或失效时间，涉及时效性结论时建议人工复核。"
+            )
+            risk_level = upgrade_risk(risk_level, "medium")
+        if evidence.get("expired_titles") and not any("可能已过期政策" in warning for warning in warnings):
+            warnings.append(
+                f"证据分层发现可能已过期政策：{', '.join(evidence['expired_titles'])}"
+            )
+            risk_level = upgrade_risk(risk_level, "medium")
+        if evidence.get("school_level_titles") and evidence.get("college_level_titles"):
+            warnings.append(
+                "检索结果同时包含学校通用政策和学院细则，应按适用学院、年级和具体通知核对最终口径。"
+            )
+            risk_level = upgrade_risk(risk_level, "medium")
+        if evidence.get("attachment_only"):
+            warnings.append("当前证据主要来自附件材料，应结合政策正文或发布通知确认办理条件。")
+            risk_level = upgrade_risk(risk_level, "medium")
+
+        risk_data["warnings"] = unique_head(warnings, 8)
+        risk_data["risk_level"] = risk_level
+        return {"risk": risk_data}
 
 
 class AnswerAgent(BaseGraphAgent):
@@ -422,6 +480,7 @@ def agent_response_from_state(state: PolicyAgentState) -> dict[str, Any]:
         "material_list": state.get("material_list") or [],
         "workflow_steps": state.get("workflow_steps") or [],
         "risk": state.get("risk") or {"risk_level": "low", "warnings": []},
+        "evidence_summary": state.get("evidence_summary") or {},
         "memory_updates": state.get("memory_updates") or [],
         "execution_trace": state.get("execution_trace") or [],
     }
@@ -429,6 +488,21 @@ def agent_response_from_state(state: PolicyAgentState) -> dict[str, Any]:
 
 def format_memory(memory: dict[str, Any]) -> str:
     return "，".join(f"{key}={value}" for key, value in memory.items())
+
+
+def unique_head(values: list[Any], limit: int) -> list[Any]:
+    result = []
+    for value in values:
+        if value and value not in result:
+            result.append(value)
+        if len(result) >= limit:
+            break
+    return result
+
+
+def upgrade_risk(current: str, target: str) -> str:
+    order = {"low": 0, "medium": 1, "high": 2}
+    return target if order.get(target, 0) > order.get(current, 0) else current
 
 
 def split_answer_sections(answer: str) -> tuple[str, str]:

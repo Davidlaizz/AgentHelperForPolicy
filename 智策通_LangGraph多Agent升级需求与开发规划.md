@@ -1163,11 +1163,13 @@ frontend/src/components/agent-graph/
 | 阶段 D | 运行日志 | 已完成 | 已写入 `agent_runs` 和 `agent_step_logs` |
 | 阶段 E | 管理后台接口 | 已完成 | Agent 图、节点、运行记录和详情接口已实现 |
 | 阶段 F | 管理后台可视化 | 已完成第一版 | 已集成到 `/admin`，暂未使用 React Flow |
-| 阶段 G | 测试与演示 | 部分完成 | 已完成烟测，仍需整理正式参赛演示脚本和场景验收记录 |
+| 阶段 G | 测试与演示 | 已完成第一版 | 已完成烟测、三条演示问题、运行轨迹记录和路演讲解脚本 |
 
 ### 19.3 下一轮 P0 任务：V1.1 验收与演示固化
 
 目标：把已经完成的多 Agent 能力整理成稳定、可复现、适合参赛路演的展示闭环。
+
+当前状态：已完成第一版，详见 [docs/v1.1-langgraph-demo-acceptance.md](D:\woskspace\AgentHelper\docs\v1.1-langgraph-demo-acceptance.md)。
 
 任务：
 
@@ -1185,16 +1187,28 @@ frontend/src/components/agent-graph/
 3. 管理后台可以看到对应运行轨迹。
 4. 讲解时能清楚说明每个 Agent 的职责和流转路径。
 
+已完成验收记录：
+
+1. `python -m pip check` 通过。
+2. `python -m compileall app` 通过。
+3. `m6_smoke_test.py` 通过。
+4. `m7_smoke_test.py` 通过。
+5. `npm run lint` 通过。
+6. `npm run build` 通过。
+7. 奖学金、转专业、毕业流程三条演示问题均生成完整 Agent 运行轨迹。
+
 ### 19.4 下一轮 P1 任务：Agent 智能化增强
 
 目标：从“规则复用型多 Agent”升级为“部分结构化智能 Agent”。
+
+当前状态：已完成第一版证据分层与风险提示增强，详见 [docs/v1.1-langgraph-p1-agent-enhancement.md](D:\woskspace\AgentHelper\docs\v1.1-langgraph-p1-agent-enhancement.md)。
 
 任务：
 
 1. 使用 LangChain structured output 增强 `IntentAgent`。
 2. 使用 LangChain structured output 增强 `SlotAgent`。
-3. 为 `EvidenceAgent` 增加更清晰的证据分层：学校通用政策、学院细则、年度通知、附件材料、已过期政策。
-4. 为 `RiskAgent` 增加冲突检测规则：学校政策与学院政策冲突、正文与附件不一致、新旧版本政策冲突、缺少生效时间。
+3. 为 `EvidenceAgent` 增加更清晰的证据分层：学校通用政策、学院细则、年度通知、附件材料、已过期政策。（已完成第一版）
+4. 为 `RiskAgent` 增加冲突检测规则：学校政策与学院政策冲突、正文与附件不一致、新旧版本政策冲突、缺少生效时间。（已完成缺少生效时间、过期政策、学校/学院层级混合、附件证据提示第一版）
 5. 增加 Agent 输出结构校验，避免某个节点返回不完整状态。
 6. 梳理 `AnswerAgent` prompt，使其更明确地区分政策原文依据、用户条件判断、AI 推断、不确定事项和下一步建议。
 
@@ -1203,6 +1217,14 @@ frontend/src/components/agent-graph/
 1. 意图识别和槽位抽取比当前规则更稳定。
 2. 回答中的政策依据、AI 推断和风险提示边界更清晰。
 3. 对附件、学院细则、有效期的解释能力增强。
+
+已完成验收记录：
+
+1. `EvidenceAgent` 已输出 `school_level_titles`、`college_level_titles`、`annual_notice_titles`、`attachment_titles`、`missing_effective_date_titles`、`expired_titles` 等结构化字段。
+2. `RiskAgent` 已基于证据摘要补充有效期、过期政策、学校/学院层级混合和附件证据风险提示。
+3. `AgentResponse` 已暴露 `evidence_summary`。
+4. 问答页 Agent 面板已展示“证据分层”。
+5. `python -m compileall app`、`m6_smoke_test.py`、`m7_smoke_test.py`、`npm run lint`、`npm run build` 均通过。
 
 ### 19.5 下一轮 P2 任务：后台可视化与治理能力
 

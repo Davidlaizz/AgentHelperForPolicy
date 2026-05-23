@@ -40,6 +40,19 @@ type AgentSlotStatus = {
   required: boolean;
 };
 
+type EvidenceSummary = {
+  retrieved_count?: number;
+  document_titles?: string[];
+  attachment_titles?: string[];
+  policy_levels?: Record<string, number>;
+  school_level_titles?: string[];
+  college_level_titles?: string[];
+  annual_notice_titles?: string[];
+  expired_titles?: string[];
+  missing_effective_date_titles?: string[];
+  attachment_only?: boolean;
+};
+
 type AgentResponse = {
   intent: string;
   case: {
@@ -64,6 +77,7 @@ type AgentResponse = {
     risk_level: string;
     warnings: string[];
   };
+  evidence_summary?: EvidenceSummary;
   memory_updates: string[];
 };
 
@@ -320,6 +334,18 @@ function AnswerContent({ response }: { response: ChatResponse }) {
 
 function AgentPanel({ agent }: { agent: AgentResponse }) {
   const knownSlots = agent.case?.slots.filter((slot) => slot.status === "known") ?? [];
+  const evidence = agent.evidence_summary ?? {};
+  const evidenceGroups = [
+    { label: "校级政策", items: evidence.school_level_titles ?? [] },
+    { label: "学院细则", items: evidence.college_level_titles ?? [] },
+    { label: "年度通知", items: evidence.annual_notice_titles ?? [] },
+    { label: "附件材料", items: evidence.attachment_titles ?? [] },
+    { label: "缺少有效期", items: evidence.missing_effective_date_titles ?? [] },
+    { label: "可能过期", items: evidence.expired_titles ?? [] },
+  ].filter((group) => group.items.length > 0);
+  const policyLevelText = Object.entries(evidence.policy_levels ?? {})
+    .map(([level, count]) => `${level} ${count}`)
+    .join(" / ");
 
   return (
     <div className="rounded-lg border border-border bg-muted/20 p-3">
@@ -329,6 +355,11 @@ function AgentPanel({ agent }: { agent: AgentResponse }) {
           <span className="rounded-md bg-background px-2 py-1">事项：{agent.case.case_title}</span>
         ) : null}
         <span className="rounded-md bg-background px-2 py-1">风险：{agent.risk.risk_level}</span>
+        {typeof evidence.retrieved_count === "number" ? (
+          <span className="rounded-md bg-background px-2 py-1">
+            证据：{evidence.retrieved_count} 段
+          </span>
+        ) : null}
       </div>
 
       {agent.follow_up_questions.length > 0 ? (
@@ -358,6 +389,28 @@ function AgentPanel({ agent }: { agent: AgentResponse }) {
             ))}
           </ul>
         </div>
+      ) : null}
+
+      {evidenceGroups.length > 0 || policyLevelText ? (
+        <details className="mb-3">
+          <summary className="cursor-pointer text-sm font-semibold text-foreground">证据分层</summary>
+          <div className="mt-2 space-y-2 text-xs leading-5 text-muted-foreground">
+            {policyLevelText ? <p>层级分布：{policyLevelText}</p> : null}
+            {evidenceGroups.map((group) => (
+              <div key={group.label}>
+                <p className="font-medium text-foreground">{group.label}</p>
+                <div className="mt-1 flex flex-wrap gap-1.5">
+                  {group.items.map((item) => (
+                    <span key={`${group.label}-${item}`} className="rounded-md bg-background px-2 py-1">
+                      {item}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            ))}
+            {evidence.attachment_only ? <p>当前检索结果主要来自附件材料。</p> : null}
+          </div>
+        </details>
       ) : null}
 
       {knownSlots.length > 0 ? (
