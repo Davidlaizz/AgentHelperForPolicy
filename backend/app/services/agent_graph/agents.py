@@ -7,6 +7,7 @@ from langchain_core.prompts import PromptTemplate
 from sqlalchemy.orm import Session
 
 from app.models import CaseSlot, ChatSession, ServiceCase
+from app.services.answer_sections import split_answer_sections
 from app.services.agent.orchestrator import (
     AgentRunState,
     build_eligibility_record,
@@ -503,10 +504,3 @@ def unique_head(values: list[Any], limit: int) -> list[Any]:
 def upgrade_risk(current: str, target: str) -> str:
     order = {"low": 0, "medium": 1, "high": 2}
     return target if order.get(target, 0) > order.get(current, 0) else current
-
-
-def split_answer_sections(answer: str) -> tuple[str, str]:
-    if "AI 推断：" not in answer:
-        return answer.strip(), "未生成额外推断。"
-    basis, inference = answer.split("AI 推断：", 1)
-    return basis.replace("政策依据：", "").strip(), inference.strip()

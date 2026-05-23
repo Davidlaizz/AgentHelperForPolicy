@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.models import ChatMessage, ChatSession, Citation, HotQuestion, User
 from app.schemas.chat import ChatCitationResponse, ChatResponse
+from app.services.answer_sections import split_answer_sections
 from app.services.agent_graph import run_policy_multi_agent_graph
 
 
@@ -140,13 +141,6 @@ def build_policy_prompt(
     if agent_context:
         context += "\n\n" + agent_context
     return context
-
-
-def split_answer_sections(answer: str) -> tuple[str, str]:
-    if "AI 推断：" not in answer:
-        return answer.strip(), "未生成额外推断。"
-    basis, inference = answer.split("AI 推断：", 1)
-    return basis.replace("政策依据：", "").strip(), inference.strip()
 
 
 def create_citations(
