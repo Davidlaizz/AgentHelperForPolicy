@@ -7,6 +7,8 @@ from sqlalchemy.orm import Session
 
 from app.models import ChatMessage, ChatSession, Citation, HotQuestion, User
 from app.schemas.chat import ChatCitationResponse, ChatResponse
+from app.services.agent import AgentOrchestrator
+from app.services.agent.rules import enrich_retrieval_query, policy_category_for_case
 from app.services.llm_provider import get_llm_provider
 from app.services.rag.metadata_filter import RetrievalFilters
 from app.services.rag.retriever import hybrid_search
@@ -26,16 +28,32 @@ def answer_policy_question(
     session.add(user_message)
     session.flush()
 
+    orchestrator = AgentOrchestrator()
+    agent_state = orchestrator.prepare(session, chat_session=chat_session, question=question)
+    effective_policy_category = policy_category or policy_category_for_case(agent_state.case_type)
+    retrieval_query = enrich_retrieval_query(question, agent_state.case_type)
+
     retrieved = hybrid_search(
         session,
-        question,
+        retrieval_query,
         RetrievalFilters(
-            policy_category=policy_category,
+            policy_category=effective_policy_category,
             include_expired=include_expired,
         ),
         top_k=top_k,
     )
-    prompt = build_policy_prompt(question, retrieved)
+    if not retrieved and effective_policy_category and policy_category is None:
+        retrieved = hybrid_search(
+            session,
+            retrieval_query,
+            RetrievalFilters(include_expired=include_expired),
+            top_k=top_k,
+        )
+    prompt = build_policy_prompt(
+        question,
+        retrieved,
+        agent_context=orchestrator.build_prompt_context(agent_state),
+    )
     raw_answer = get_llm_provider().generate(prompt, retrieved)
     policy_basis, ai_inference = split_answer_sections(raw_answer)
 
@@ -53,6 +71,14 @@ def answer_policy_question(
     session.flush()
 
     citations = create_citations(session, assistant_message, retrieved)
+    agent_response = orchestrator.finalize(
+        session,
+        state=agent_state,
+        chat_session=chat_session,
+        assistant_message=assistant_message,
+        retrieved=retrieved,
+        answer=raw_answer,
+    )
     update_hot_question(session, question, policy_category)
     session.commit()
     session.refresh(user_message)
@@ -68,6 +94,7 @@ def answer_policy_question(
         ai_inference=ai_inference,
         citations=citations,
         retrieved_chunks=retrieved,
+        agent=agent_response,
     )
 
 
@@ -110,7 +137,11 @@ def get_or_create_user(db: Session, user_id: str | None) -> User:
     return user
 
 
-def build_policy_prompt(question: str, retrieved: list[dict]) -> str:
+def build_policy_prompt(
+    question: str,
+    retrieved: list[dict],
+    agent_context: str | None = None,
+) -> str:
     context_lines = []
     for index, item in enumerate(retrieved, start=1):
         context_lines.append(
@@ -124,13 +155,16 @@ def build_policy_prompt(question: str, retrieved: list[dict]) -> str:
             )
         )
 
-    return (
+    context = (
         "请基于以下政策片段回答问题。必须区分“政策依据”和“AI 推断”；"
         "如果片段不足以支持结论，要明确说明不确定。\n\n"
         f"用户问题：{question}\n\n"
         "政策片段：\n"
         + "\n\n".join(context_lines)
     )
+    if agent_context:
+        context += "\n\n" + agent_context
+    return context
 
 
 def split_answer_sections(answer: str) -> tuple[str, str]:

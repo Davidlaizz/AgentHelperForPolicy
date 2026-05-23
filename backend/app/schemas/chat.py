@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
+from app.schemas.agent import AgentResponse
 from app.schemas.rag import RAGSearchResult
 
 
@@ -38,3 +39,4 @@ class ChatResponse(BaseModel):
     ai_inference: str
     citations: list[ChatCitationResponse]
     retrieved_chunks: list[RAGSearchResult]
+    agent: AgentResponse | None = None
