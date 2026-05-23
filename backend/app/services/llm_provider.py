@@ -65,7 +65,7 @@ class HttpLLMProvider(LLMProvider):
             headers["Authorization"] = f"Bearer {settings.llm_api_key}"
 
         request = urllib.request.Request(
-            settings.llm_api_url,
+            normalize_chat_completions_url(settings.llm_api_url),
             data=payload,
             headers=headers,
             method="POST",
@@ -113,6 +113,13 @@ def format_llm_http_error(error: urllib.error.HTTPError) -> str:
             code_text = f"，code {body['code']}"
 
     return f"LLM 服务调用失败（HTTP {error.code}{code_text}）：{message}"
+
+
+def normalize_chat_completions_url(url: str) -> str:
+    normalized = url.rstrip("/")
+    if normalized.endswith("/chat/completions"):
+        return normalized
+    return f"{normalized}/chat/completions"
 
 
 def citation_location(item: dict) -> str:
