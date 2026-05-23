@@ -35,6 +35,7 @@ class AgentRiskResponse(BaseModel):
 
 
 class AgentResponse(BaseModel):
+    run_id: str | None = None
     intent: str
     case: AgentCaseResponse | None = None
     missing_slots: list[AgentSlotStatus]
@@ -44,3 +45,4 @@ class AgentResponse(BaseModel):
     workflow_steps: list[str]
     risk: AgentRiskResponse
     memory_updates: list[str]
+    execution_trace: list[dict] = []
