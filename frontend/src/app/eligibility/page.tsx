@@ -273,8 +273,14 @@ export default function EligibilityPage() {
         <SectionCard title="判断结果" description="资格结论来自政策片段和已知条件，仍需以学校审核为准。">
           {agent?.eligibility ? (
             <div className="space-y-4">
-              <div className="rounded-md bg-accent px-3 py-2 text-sm font-medium text-accent-foreground">
-                {agent.eligibility.result_status}：{agent.eligibility.result_summary}
+              <div className={`rounded-lg border px-4 py-3 ${eligibilityTone(agent.eligibility.result_status)}`}>
+                <div className="mb-2 flex flex-wrap items-center gap-2">
+                  <span className="text-sm font-semibold">{eligibilityStatusLabel(agent.eligibility.result_status)}</span>
+                  <span className="rounded-md bg-background/70 px-2 py-1 text-xs">
+                    已满足 {agent.eligibility.matched_conditions.length} 项 / 待确认 {agent.eligibility.pending_conditions.length} 项 / 风险 {agent.eligibility.unmet_conditions.length} 项
+                  </span>
+                </div>
+                <p className="text-sm leading-6">{agent.eligibility.result_summary}</p>
               </div>
               <ConditionList title="满足或已提供" items={agent.eligibility.matched_conditions} />
               <ConditionList title="不满足" items={agent.eligibility.unmet_conditions} />
@@ -364,4 +370,21 @@ function formatValue(value: AgentSlot["value"]) {
   if (typeof value === "boolean") return value ? "是" : "否";
   if (typeof value === "object") return JSON.stringify(value);
   return String(value);
+}
+
+function eligibilityStatusLabel(status: string) {
+  if (status === "likely_eligible") return "初步倾向：具备申请基础";
+  if (status === "not_eligible") return "初步倾向：存在不满足项";
+  if (status === "pending") return "初步倾向：待补充后确认";
+  return "初步判断";
+}
+
+function eligibilityTone(status: string) {
+  if (status === "likely_eligible") {
+    return "border-emerald-200 bg-emerald-50 text-emerald-900";
+  }
+  if (status === "not_eligible") {
+    return "border-red-200 bg-red-50 text-red-900";
+  }
+  return "border-blue-200 bg-blue-50 text-blue-900";
 }

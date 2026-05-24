@@ -386,13 +386,31 @@ def build_eligibility_record(
 
     if unmet:
         result_status = "not_eligible"
-        result_summary = "根据已知条件，存在不满足项，需要结合政策条款进一步确认。"
+        result_summary = (
+            f"初步判断：存在 {len(unmet)} 项不满足或高风险条件"
+            f"（{join_preview(unmet)}），暂不建议直接认定为符合资格。"
+            "建议先处理不满足项，再按政策条款和学院要求复核。"
+        )
     elif pending:
         result_status = "pending"
-        result_summary = "当前信息不足，需补充关键条件后才能做资格判断。"
+        if matched:
+            result_summary = (
+                f"初步判断：已提供 {len(matched)} 项有效条件"
+                f"（{join_preview(matched)}），目前未发现明确不满足项；"
+                f"还需补充 {len(pending)} 项关键信息（{join_preview(pending)}）后，可形成更明确结论。"
+            )
+        else:
+            result_summary = (
+                f"初步判断：当前缺少 {len(pending)} 项关键信息"
+                f"（{join_preview(pending)}），暂不能判断是否符合资格。"
+            )
     else:
         result_status = "likely_eligible"
-        result_summary = "当前已知条件未发现明显不满足项，但仍需以政策原文和学院审核为准。"
+        result_summary = (
+            f"初步判断：已知 {len(matched)} 项条件未发现明显不满足项"
+            f"（{join_preview(matched)}），可进入材料准备和学院审核环节。"
+            "最终结论仍以学校正式审核为准。"
+        )
 
     record = EligibilityRecord(
         case_id=state.case.id,
@@ -416,6 +434,15 @@ def build_eligibility_record(
         pending_conditions=pending,
         result_summary=result_summary,
     )
+
+
+def join_preview(items: list[str], limit: int = 3) -> str:
+    if not items:
+        return "无"
+    preview = "、".join(items[:limit])
+    if len(items) > limit:
+        preview += f"等 {len(items)} 项"
+    return preview
 
 
 def build_risk(

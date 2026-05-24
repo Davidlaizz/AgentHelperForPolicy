@@ -97,6 +97,8 @@ const starterQuestions = [
   "大类专业分流系统在哪里进入？",
 ];
 
+const inferenceFallbackTexts = new Set(["", "无", "无。", "暂无 AI 推断。", "未生成额外推断。"]);
+
 export default function ChatPage() {
   const [question, setQuestion] = useState("");
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -285,17 +287,21 @@ export default function ChatPage() {
 }
 
 function AnswerContent({ response }: { response: ChatResponse }) {
+  const { policyBasis, aiInference, hasAiInference } = splitDisplaySections(response);
+
   return (
     <div className="space-y-4">
-      <div className="grid gap-3 md:grid-cols-2">
+      <div className={hasAiInference ? "grid gap-3 xl:grid-cols-[1.15fr_0.85fr]" : "grid gap-3"}>
         <div className="rounded-lg border border-border bg-muted/30 p-4">
           <h3 className="mb-2 text-sm font-semibold text-foreground">政策依据</h3>
-          <MarkdownText text={response.policy_basis} emptyText="暂无政策依据。" />
+          <MarkdownText text={policyBasis} emptyText="暂无政策依据。" />
         </div>
-        <div className="rounded-lg border border-border bg-muted/30 p-4">
-          <h3 className="mb-2 text-sm font-semibold text-foreground">AI 推断</h3>
-          <MarkdownText text={response.ai_inference} emptyText="暂无 AI 推断。" />
-        </div>
+        {hasAiInference ? (
+          <div className="rounded-lg border border-border bg-blue-50/40 p-4">
+            <h3 className="mb-2 text-sm font-semibold text-foreground">AI 推断</h3>
+            <MarkdownText text={aiInference} emptyText="暂无 AI 推断。" />
+          </div>
+        ) : null}
       </div>
 
       {response.agent ? <AgentPanel agent={response.agent} /> : null}
@@ -330,6 +336,46 @@ function AnswerContent({ response }: { response: ChatResponse }) {
       </div>
     </div>
   );
+}
+
+function splitDisplaySections(response: ChatResponse) {
+  const fallbackInference = response.ai_inference.trim();
+  const embeddedInferenceMatch = response.policy_basis.match(
+    /(?:^|\n)\s*(?:#{1,6}\s*)?(?:[-*]\s*)?(?:\*\*)?\s*(?:\d+[.、]\s*)?(?:AI\s*推断|AI推断|目前不确定点|不确定点)\s*(?:\*\*)?\s*(?:[：:]|$)/i,
+  );
+
+  if (embeddedInferenceMatch?.index !== undefined) {
+    const headingStart = embeddedInferenceMatch.index;
+    const headingEnd = headingStart + embeddedInferenceMatch[0].length;
+    const policyBasis = stripLeadingDisplayHeading(response.policy_basis.slice(0, headingStart));
+    const embeddedInference = stripLeadingDisplayHeading(response.policy_basis.slice(headingEnd));
+    const aiInference = isMeaningfulInference(embeddedInference) ? embeddedInference : fallbackInference;
+    return {
+      policyBasis,
+      aiInference,
+      hasAiInference: isMeaningfulInference(aiInference),
+    };
+  }
+
+  return {
+    policyBasis: stripLeadingDisplayHeading(response.policy_basis),
+    aiInference: fallbackInference,
+    hasAiInference: isMeaningfulInference(fallbackInference),
+  };
+}
+
+function stripLeadingDisplayHeading(text: string) {
+  return text
+    .trim()
+    .replace(
+      /^(?:#{1,6}\s*)?(?:[-*]\s*)?(?:\*\*)?\s*(?:\d+[.、]\s*)?(?:政策依据|AI\s*推断|AI推断|目前不确定点|不确定点)\s*(?:\*\*)?\s*[：:]?\s*/i,
+      "",
+    )
+    .trim();
+}
+
+function isMeaningfulInference(text: string) {
+  return !inferenceFallbackTexts.has(text.trim());
 }
 
 function AgentPanel({ agent }: { agent: AgentResponse }) {
