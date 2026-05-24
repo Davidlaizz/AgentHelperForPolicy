@@ -6,14 +6,18 @@ import {
   BarChart3,
   BookOpenCheck,
   Activity,
+  Cpu,
+  Database,
   FileText,
   GitBranch,
+  KeyRound,
   MessageSquareText,
   Pencil,
   RefreshCw,
   RotateCcw,
   Save,
   ShieldAlert,
+  SlidersHorizontal,
   Trash2,
   Upload,
   Workflow,
@@ -141,6 +145,52 @@ type AgentStepLog = {
 type AgentRunDetail = {
   run: AgentRun;
   steps: AgentStepLog[];
+};
+
+type SystemConfig = {
+  model_service: {
+    provider: string;
+    model: string;
+    api_url: string | null;
+    api_key_status: string;
+    api_key_masked: string | null;
+    max_tokens: number | null;
+    timeout_seconds: number;
+    thinking_type: string | null;
+    compatible_protocol: string;
+    editable_fields: string[];
+    available_presets: {
+      id: string;
+      label: string;
+      provider: string;
+      model: string;
+      api_url: string | null;
+      description: string;
+      keep_current_api_key: boolean;
+    }[];
+  };
+  rag_service: {
+    embedding_provider: string;
+    embedding_model: string;
+    embedding_dimensions: number;
+    embedding_api_url: string | null;
+    embedding_api_key_status: string;
+    embedding_api_key_masked: string | null;
+    vector_schema: string;
+    vector_table: string;
+    editable_fields: string[];
+  };
+  agent_governance: {
+    graph_version: string;
+    node_count: number;
+    edge_count: number;
+    orchestration_framework: string;
+    editable_items: string[];
+    runtime_observability: boolean;
+  };
+  edit_mode: string;
+  edit_note: string;
+  updated_at: string;
 };
 
 type GraphSelection =
@@ -325,6 +375,8 @@ export default function AdminPage() {
   const [agentGraph, setAgentGraph] = useState<AgentGraph | null>(null);
   const [agentRuns, setAgentRuns] = useState<AgentRun[]>([]);
   const [agentRunDetail, setAgentRunDetail] = useState<AgentRunDetail | null>(null);
+  const [systemConfig, setSystemConfig] = useState<SystemConfig | null>(null);
+  const [configEditOpen, setConfigEditOpen] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [documentRole, setDocumentRole] = useState<"main" | "attachment">("main");
   const [parentDocumentId, setParentDocumentId] = useState("");
@@ -389,14 +441,22 @@ export default function AdminPage() {
   }, []);
 
   const loadAll = useCallback(async () => {
-    const [documentResponse, dashboardResponse, hotResponse, answerResponse, agentGraphResponse, agentRunsResponse] =
-      await Promise.all([
+    const [
+      documentResponse,
+      dashboardResponse,
+      hotResponse,
+      answerResponse,
+      agentGraphResponse,
+      agentRunsResponse,
+      systemConfigResponse,
+    ] = await Promise.all([
         fetch(`${apiBaseUrl}/api/documents`, { cache: "no-store" }),
         fetch(`${apiBaseUrl}/api/management/dashboard`, { cache: "no-store" }),
         fetch(`${apiBaseUrl}/api/management/hot-questions?limit=8`, { cache: "no-store" }),
         fetch(`${apiBaseUrl}/api/management/standard-answers`, { cache: "no-store" }),
         fetch(`${apiBaseUrl}/api/management/agent-graph`, { cache: "no-store" }),
         fetch(`${apiBaseUrl}/api/management/agent-runs?limit=8`, { cache: "no-store" }),
+        fetch(`${apiBaseUrl}/api/management/system-config`, { cache: "no-store" }),
       ]);
 
     if (!documentResponse.ok) throw new Error("文件列表加载失败");
@@ -406,11 +466,14 @@ export default function AdminPage() {
     if (!agentGraphResponse.ok) throw new Error("Agent 架构加载失败");
     if (!agentRunsResponse.ok) throw new Error("Agent 运行记录加载失败");
 
+    if (!systemConfigResponse.ok) throw new Error("系统配置加载失败");
+
     setDocuments(await documentResponse.json());
     setDashboard(await dashboardResponse.json());
     setHotQuestions(await hotResponse.json());
     setStandardAnswers(await answerResponse.json());
     setAgentGraph(await agentGraphResponse.json());
+    setSystemConfig(await systemConfigResponse.json());
     const agentRunsData: AgentRun[] = await agentRunsResponse.json();
     setAgentRuns(agentRunsData);
     if (agentRunsData[0]) {
@@ -634,7 +697,7 @@ export default function AdminPage() {
           <Metric icon={<BookOpenCheck className="size-4" />} label="已解析" value={dashboard?.parsed_document_count ?? 0} />
           <Metric icon={<BarChart3 className="size-4" />} label="知识切片" value={dashboard?.chunk_count ?? 0} />
           <Metric icon={<MessageSquareText className="size-4" />} label="今日问答" value={dashboard?.today_question_count ?? 0} />
-          <Metric icon={<ShieldAlert className="size-4" />} label="高风险" value={dashboard?.high_risk_answer_count ?? 0} />
+          <Metric icon={<ShieldAlert className="size-4" />} label="需人工复核" value={dashboard?.high_risk_answer_count ?? 0} />
           <Metric icon={<BookOpenCheck className="size-4" />} label="标准答案" value={dashboard?.standard_answer_count ?? 0} />
         </div>
         <div className="mt-4 flex flex-wrap items-center gap-3">
@@ -688,7 +751,7 @@ export default function AdminPage() {
             <div className="grid gap-3">
               <Metric icon={<Workflow className="size-4" />} label="Agent 节点" value={agentGraph?.nodes.length ?? 0} />
               <Metric icon={<GitBranch className="size-4" />} label="路由边" value={agentGraph?.edges.length ?? 0} />
-              <Metric icon={<ShieldAlert className="size-4" />} label="高风险回答" value={dashboard?.high_risk_answer_count ?? 0} />
+              <Metric icon={<ShieldAlert className="size-4" />} label="复核预警" value={dashboard?.high_risk_answer_count ?? 0} />
             </div>
           </SectionCard>
         </div>
@@ -1034,30 +1097,273 @@ export default function AdminPage() {
       ) : null}
 
       {activeAdminTab === "settings" ? (
-        <SectionCard title="系统配置" description="集中展示模型、RAG 和 Agent 治理配置；当前版本以只读说明为主。">
-          <div className="grid gap-4 md:grid-cols-3">
-            <div className="rounded-lg border border-border bg-background p-4">
-              <p className="text-sm font-medium text-foreground">模型服务</p>
-              <p className="mt-2 text-xs leading-5 text-muted-foreground">
-                当前后端通过 OpenAI-compatible API 接入模型，可在后续扩展模型开关、温度、超时和降级策略。
-              </p>
-            </div>
-            <div className="rounded-lg border border-border bg-background p-4">
-              <p className="text-sm font-medium text-foreground">RAG 检索</p>
-              <p className="mt-2 text-xs leading-5 text-muted-foreground">
-                知识库采用政策 metadata、有效期、附件关系和向量检索，后续可开放 top_k、过滤条件和重建索引配置。
-              </p>
-            </div>
-            <div className="rounded-lg border border-border bg-background p-4">
-              <p className="text-sm font-medium text-foreground">Agent 治理</p>
-              <p className="mt-2 text-xs leading-5 text-muted-foreground">
-                当前支持节点观测、运行轨迹和风险校验，后续可开放节点启停、Prompt 编辑和日志保留策略。
-              </p>
-            </div>
-          </div>
-        </SectionCard>
+        <SystemConfigPanel
+          config={systemConfig}
+          editOpen={configEditOpen}
+          onToggleEdit={() => setConfigEditOpen((current) => !current)}
+          onConfigSaved={setSystemConfig}
+        />
       ) : null}
     </div>
+  );
+}
+
+function SystemConfigPanel({
+  config,
+  editOpen,
+  onToggleEdit,
+  onConfigSaved,
+}: {
+  config: SystemConfig | null;
+  editOpen: boolean;
+  onToggleEdit: () => void;
+  onConfigSaved: (config: SystemConfig) => void;
+}) {
+  const model = config?.model_service;
+  const rag = config?.rag_service;
+  const governance = config?.agent_governance;
+  const [savingConfig, setSavingConfig] = useState(false);
+  const [configMessage, setConfigMessage] = useState("");
+
+  async function saveModelConfig(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const formData = new FormData(event.currentTarget);
+    setSavingConfig(true);
+    setConfigMessage("");
+    try {
+      const response = await fetch(`${apiBaseUrl}/api/management/system-config/model-service`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          provider: String(formData.get("provider") ?? "").trim(),
+          model: String(formData.get("model") ?? "").trim(),
+          api_url: String(formData.get("api_url") ?? "").trim(),
+          api_key: String(formData.get("api_key") ?? "").trim() || null,
+          max_tokens: numberFromForm(formData.get("max_tokens")),
+          timeout_seconds: numberFromForm(formData.get("timeout_seconds")),
+          thinking_type: String(formData.get("thinking_type") ?? "").trim() || null,
+        }),
+      });
+      if (!response.ok) {
+        throw new Error(await readErrorMessage(response, "模型配置热更新失败"));
+      }
+      const nextConfig: SystemConfig = await response.json();
+      onConfigSaved(nextConfig);
+      setConfigMessage("模型配置已热更新，新问答请求会立即使用当前配置。");
+    } catch (error) {
+      setConfigMessage(error instanceof Error ? error.message : "模型配置热更新失败");
+    } finally {
+      setSavingConfig(false);
+    }
+  }
+
+  async function applyPreset(presetId: string) {
+    setSavingConfig(true);
+    setConfigMessage("");
+    try {
+      const response = await fetch(`${apiBaseUrl}/api/management/system-config/model-service`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ preset_id: presetId }),
+      });
+      if (!response.ok) {
+        throw new Error(await readErrorMessage(response, "模型预设切换失败"));
+      }
+      const nextConfig: SystemConfig = await response.json();
+      onConfigSaved(nextConfig);
+      setConfigMessage(`已切换到 ${nextConfig.model_service.model}，新请求立即生效。`);
+    } catch (error) {
+      setConfigMessage(error instanceof Error ? error.message : "模型预设切换失败");
+    } finally {
+      setSavingConfig(false);
+    }
+  }
+
+  return (
+    <SectionCard
+      title="系统配置"
+      description="集中展示当前后端实际生效的模型、RAG 和 Agent 编排配置，并预留配置中心编辑入口。"
+    >
+      <div className="grid gap-4 xl:grid-cols-[1.35fr_1fr]">
+        <div className="rounded-lg border border-indigo-100 bg-indigo-50/40 p-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="flex items-start gap-3">
+              <div className="rounded-lg bg-indigo-600 p-2 text-white">
+                <Cpu className="size-5" />
+              </div>
+              <div>
+                <p className="text-sm font-medium text-indigo-950">模型服务</p>
+                <p className="mt-1 text-2xl font-semibold tracking-tight text-indigo-950">
+                  {model?.model ?? "加载中"}
+                </p>
+                <p className="mt-1 text-xs text-indigo-700">
+                  {model?.provider ?? "--"} · {model?.compatible_protocol ?? "OpenAI-compatible"}
+                </p>
+              </div>
+            </div>
+            <Button type="button" variant="outline" size="sm" onClick={onToggleEdit}>
+              <SlidersHorizontal className="size-4" />
+              {editOpen ? "收起编辑" : "编辑配置"}
+            </Button>
+          </div>
+
+          <div className="mt-4 grid gap-3 md:grid-cols-2">
+            <ConfigItem label="API 地址" value={model?.api_url ?? "未配置"} />
+            <ConfigItem
+              label="API Key"
+              value={secretStatusLabel(model?.api_key_status, model?.api_key_masked)}
+              icon={<KeyRound className="size-4" />}
+            />
+            <ConfigItem label="最大输出" value={model?.max_tokens ? `${model.max_tokens} tokens` : "未限制"} />
+            <ConfigItem label="超时时间" value={model ? `${model.timeout_seconds}s` : "--"} />
+            <ConfigItem label="思考模式" value={model?.thinking_type ?? "未配置"} />
+            <ConfigItem label="更新时间" value={config ? formatDateTime(config.updated_at) : "--"} />
+          </div>
+
+          {editOpen ? (
+            <form
+              key={`${model?.provider}-${model?.model}-${model?.api_url}`}
+              onSubmit={saveModelConfig}
+              className="mt-4 rounded-lg border border-indigo-100 bg-background p-4"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <p className="text-sm font-medium text-foreground">热更新配置</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    保存后立即写入当前后端进程，新问答请求会直接使用新模型；API Key 留空表示沿用原密钥。
+                  </p>
+                </div>
+                <span className="rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-xs text-amber-700">
+                  {config?.edit_mode ?? "runtime_readonly"}
+                </span>
+              </div>
+              <div className="mt-3 grid gap-2 md:grid-cols-2">
+                {(model?.available_presets ?? []).map((preset) => {
+                  const active = model?.provider === preset.provider && model?.model === preset.model;
+                  return (
+                    <button
+                      key={preset.id}
+                      type="button"
+                      disabled={savingConfig}
+                      onClick={() => applyPreset(preset.id)}
+                      className={`rounded-lg border p-3 text-left transition ${
+                        active
+                          ? "border-indigo-300 bg-indigo-50 text-indigo-950"
+                          : "border-border bg-muted/30 hover:border-indigo-200 hover:bg-indigo-50/60"
+                      }`}
+                    >
+                      <span className="text-sm font-medium">{preset.label}</span>
+                      <span className="mt-1 block text-xs text-muted-foreground">{preset.description}</span>
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="mt-3 grid gap-3 md:grid-cols-2">
+                <ConfigDraftField name="provider" label="LLM_PROVIDER" defaultValue={model?.provider} />
+                <ConfigDraftField name="model" label="LLM_MODEL" defaultValue={model?.model} />
+                <ConfigDraftField name="api_url" label="LLM_API_URL" defaultValue={model?.api_url} />
+                <ConfigDraftField
+                  name="api_key"
+                  label="LLM_API_KEY"
+                  placeholder="留空则不修改当前密钥"
+                  type="password"
+                />
+                <ConfigDraftField name="max_tokens" label="LLM_MAX_TOKENS" defaultValue={model?.max_tokens?.toString()} type="number" />
+                <ConfigDraftField name="timeout_seconds" label="LLM_TIMEOUT_SECONDS" defaultValue={model?.timeout_seconds?.toString()} type="number" />
+                <ConfigDraftField name="thinking_type" label="LLM_THINKING_TYPE" defaultValue={model?.thinking_type} />
+              </div>
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+                <p className="text-xs leading-5 text-muted-foreground">{config?.edit_note}</p>
+                <Button type="submit" variant="outline" size="sm" disabled={savingConfig}>
+                  <Save className="size-4" />
+                  保存并热更新
+                </Button>
+              </div>
+              {configMessage ? (
+                <p className="mt-3 rounded-md bg-muted px-3 py-2 text-xs text-muted-foreground">{configMessage}</p>
+              ) : null}
+            </form>
+          ) : null}
+        </div>
+
+        <div className="grid gap-4">
+          <div className="rounded-lg border border-border bg-background p-4">
+            <div className="flex items-center gap-2">
+              <Database className="size-4 text-emerald-600" />
+              <p className="text-sm font-medium text-foreground">RAG 检索</p>
+            </div>
+            <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
+              <ConfigItem label="Embedding 模型" value={rag?.embedding_model ?? "加载中"} />
+              <ConfigItem label="向量维度" value={rag ? `${rag.embedding_dimensions}` : "--"} />
+              <ConfigItem label="向量表" value={rag ? `${rag.vector_schema}.${rag.vector_table}` : "--"} />
+              <ConfigItem label="Embedding Key" value={secretStatusLabel(rag?.embedding_api_key_status, rag?.embedding_api_key_masked)} />
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-border bg-background p-4">
+            <div className="flex items-center gap-2">
+              <GitBranch className="size-4 text-sky-600" />
+              <p className="text-sm font-medium text-foreground">Agent 治理</p>
+            </div>
+            <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
+              <ConfigItem label="编排框架" value={governance?.orchestration_framework ?? "加载中"} />
+              <ConfigItem label="图版本" value={governance?.graph_version ?? "--"} />
+              <ConfigItem
+                label="节点/边"
+                value={governance ? `${governance.node_count} 个节点 / ${governance.edge_count} 条边` : "--"}
+              />
+              <ConfigItem label="观测能力" value={governance?.runtime_observability ? "已开启" : "未开启"} />
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {(governance?.editable_items ?? []).map((item) => (
+                <span key={item} className="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
+                  {item}
+                </span>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    </SectionCard>
+  );
+}
+
+function ConfigItem({ label, value, icon }: { label: string; value: string; icon?: ReactNode }) {
+  return (
+    <div className="min-w-0 rounded-md border border-border bg-background/80 p-3">
+      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+        {icon}
+        <span>{label}</span>
+      </div>
+      <p className="mt-1 break-words text-sm font-medium text-foreground">{value}</p>
+    </div>
+  );
+}
+
+function ConfigDraftField({
+  name,
+  label,
+  defaultValue,
+  placeholder,
+  type = "text",
+}: {
+  name: string;
+  label: string;
+  defaultValue?: string | null;
+  placeholder?: string;
+  type?: string;
+}) {
+  return (
+    <label className="block space-y-1 text-xs font-medium text-muted-foreground">
+      <span>{label}</span>
+      <input
+        name={name}
+        type={type}
+        defaultValue={defaultValue ?? ""}
+        placeholder={placeholder}
+        className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground"
+      />
+    </label>
   );
 }
 
@@ -2199,6 +2505,27 @@ function compactStepSummary(step: AgentStepLog) {
 
 function truncateText(value: string, maxLength: number) {
   return value.length > maxLength ? `${value.slice(0, maxLength)}...` : value;
+}
+
+function secretStatusLabel(status?: string, masked?: string | null) {
+  if (status === "configured") {
+    return masked ? `已配置（${masked}）` : "已配置";
+  }
+  return "未配置";
+}
+
+function numberFromForm(value: FormDataEntryValue | null) {
+  const normalized = String(value ?? "").trim();
+  return normalized ? Number(normalized) : null;
+}
+
+async function readErrorMessage(response: Response, fallback: string) {
+  try {
+    const body = await response.json();
+    return body.detail ?? fallback;
+  } catch {
+    return fallback;
+  }
 }
 
 function formatDateTime(value: string) {

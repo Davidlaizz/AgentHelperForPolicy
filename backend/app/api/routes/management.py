@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.db.dependencies import get_db
 from app.models import (
     AgentRun,
@@ -36,11 +37,44 @@ from app.schemas.management import (
     StandardAnswerCreateRequest,
     StandardAnswerResponse,
     StandardAnswerUpdateRequest,
+    AgentGovernanceConfigResponse,
+    ModelServiceConfigResponse,
+    ModelServicePresetResponse,
+    ModelServiceUpdateRequest,
+    RagServiceConfigResponse,
+    SystemConfigResponse,
 )
 from app.services.agent_graph.config import AGENT_EDGE_DEFINITIONS, AGENT_NODE_DEFINITIONS, GRAPH_DESCRIPTION, GRAPH_VERSION
 from app.services.policy_qa import is_valid_hot_question
 
 router = APIRouter(prefix="/management", tags=["management"])
+
+MODEL_SERVICE_PRESETS = [
+    {
+        "id": "codex-local",
+        "label": "Codex 本地模型",
+        "provider": "http",
+        "model": "gpt-5.3-codex",
+        "api_url": "http://127.0.0.1:49742/v1",
+        "description": "当前本地 OpenAI-compatible 服务，适合 Codex 开发演示链路。",
+        "keep_current_api_key": True,
+        "max_tokens": 1200,
+        "timeout_seconds": 180,
+        "thinking_type": "disabled",
+    },
+    {
+        "id": "glm-4.6",
+        "label": "GLM-4.6",
+        "provider": "http",
+        "model": "glm-4.6",
+        "api_url": None,
+        "description": "切换为 GLM-4.6 模型名，默认复用当前 OpenAI-compatible 地址和密钥。",
+        "keep_current_api_key": True,
+        "max_tokens": 1200,
+        "timeout_seconds": 180,
+        "thinking_type": "disabled",
+    },
+]
 
 
 @router.get("/dashboard", response_model=DashboardResponse)
@@ -211,6 +245,82 @@ def list_policy_chunks(
     )
 
 
+@router.get("/system-config", response_model=SystemConfigResponse)
+def system_config() -> SystemConfigResponse:
+    return build_system_config_response()
+
+
+@router.patch("/system-config/model-service", response_model=SystemConfigResponse)
+def update_model_service(payload: ModelServiceUpdateRequest) -> SystemConfigResponse:
+    update_llm_runtime_config(payload)
+    return build_system_config_response()
+
+
+def build_system_config_response() -> SystemConfigResponse:
+    return SystemConfigResponse(
+        model_service=ModelServiceConfigResponse(
+            provider=settings.llm_provider,
+            model=settings.llm_model,
+            api_url=settings.llm_api_url,
+            api_key_status=secret_status(settings.llm_api_key),
+            api_key_masked=mask_secret(settings.llm_api_key),
+            max_tokens=settings.llm_max_tokens,
+            timeout_seconds=settings.llm_timeout_seconds,
+            thinking_type=settings.llm_thinking_type,
+            compatible_protocol="OpenAI-compatible Chat Completions",
+            editable_fields=[
+                "LLM_PROVIDER",
+                "LLM_MODEL",
+                "LLM_API_URL",
+                "LLM_API_KEY",
+                "LLM_MAX_TOKENS",
+                "LLM_TIMEOUT_SECONDS",
+                "LLM_THINKING_TYPE",
+            ],
+            available_presets=[
+                ModelServicePresetResponse(
+                    id=item["id"],
+                    label=item["label"],
+                    provider=item["provider"],
+                    model=item["model"],
+                    api_url=item["api_url"],
+                    description=item["description"],
+                    keep_current_api_key=item["keep_current_api_key"],
+                )
+                for item in MODEL_SERVICE_PRESETS
+            ],
+        ),
+        rag_service=RagServiceConfigResponse(
+            embedding_provider=settings.embedding_provider,
+            embedding_model=settings.embedding_model,
+            embedding_dimensions=settings.embedding_dimensions,
+            embedding_api_url=settings.embedding_api_url,
+            embedding_api_key_status=secret_status(settings.embedding_api_key),
+            embedding_api_key_masked=mask_secret(settings.embedding_api_key),
+            vector_schema=settings.llamaindex_schema,
+            vector_table=settings.llamaindex_vector_table,
+            editable_fields=[
+                "EMBEDDING_PROVIDER",
+                "EMBEDDING_MODEL",
+                "EMBEDDING_DIMENSIONS",
+                "LLAMAINDEX_SCHEMA",
+                "LLAMAINDEX_VECTOR_TABLE",
+            ],
+        ),
+        agent_governance=AgentGovernanceConfigResponse(
+            graph_version=GRAPH_VERSION,
+            node_count=len(AGENT_NODE_DEFINITIONS),
+            edge_count=len(AGENT_EDGE_DEFINITIONS),
+            orchestration_framework="LangGraph + LangChain structured output",
+            editable_items=["节点启停", "Prompt 版本", "风险阈值", "兜底策略"],
+            runtime_observability=True,
+        ),
+        edit_mode="runtime_hot_update",
+        edit_note="当前页面支持运行时热更新，新请求会立即使用最新模型配置；重启后仍以 backend/.env 或后续配置中心为准。",
+        updated_at=datetime.now(timezone.utc),
+    )
+
+
 @router.get("/agent-graph", response_model=AgentGraphResponse)
 def agent_graph(db: Annotated[Session, Depends(get_db)]) -> AgentGraphResponse:
     return AgentGraphResponse(
@@ -283,6 +393,76 @@ def agent_run_detail(
 
 def scalar_count(db: Session, statement) -> int:
     return int(db.execute(statement).scalar_one() or 0)
+
+
+def secret_status(value: str | None) -> str:
+    return "configured" if value else "missing"
+
+
+def mask_secret(value: str | None) -> str | None:
+    if not value:
+        return None
+    if len(value) <= 8:
+        return "*" * len(value)
+    return f"{value[:4]}...{value[-4:]}"
+
+
+def update_llm_runtime_config(payload: ModelServiceUpdateRequest) -> None:
+    preset = find_model_preset(payload.preset_id) if payload.preset_id else None
+
+    provider = payload.provider or (preset["provider"] if preset else settings.llm_provider)
+    model = payload.model or (preset["model"] if preset else settings.llm_model)
+    api_url = (
+        payload.api_url
+        if payload.api_url is not None
+        else preset["api_url"] if preset and preset.get("api_url") else settings.llm_api_url
+    )
+    max_tokens = (
+        payload.max_tokens
+        if payload.max_tokens is not None
+        else preset["max_tokens"] if preset and preset.get("max_tokens") else settings.llm_max_tokens
+    )
+    timeout_seconds = (
+        payload.timeout_seconds
+        if payload.timeout_seconds is not None
+        else preset["timeout_seconds"] if preset and preset.get("timeout_seconds") else settings.llm_timeout_seconds
+    )
+    thinking_type = (
+        normalize_optional_text(payload.thinking_type)
+        if payload.thinking_type is not None
+        else preset["thinking_type"] if preset and "thinking_type" in preset else settings.llm_thinking_type
+    )
+
+    if provider not in {"mock", "http"}:
+        raise HTTPException(status_code=400, detail=f"不支持的 LLM provider：{provider}")
+    if provider == "http" and not normalize_optional_text(api_url):
+        raise HTTPException(status_code=400, detail="HTTP 模型服务必须配置 API 地址")
+
+    settings.llm_provider = provider
+    settings.llm_model = model
+    settings.llm_api_url = normalize_optional_text(api_url)
+    settings.llm_max_tokens = max_tokens
+    settings.llm_timeout_seconds = timeout_seconds
+    settings.llm_thinking_type = thinking_type
+
+    if payload.clear_api_key:
+        settings.llm_api_key = None
+    elif payload.api_key is not None and payload.api_key.strip():
+        settings.llm_api_key = payload.api_key.strip()
+
+
+def find_model_preset(preset_id: str | None) -> dict:
+    for preset in MODEL_SERVICE_PRESETS:
+        if preset["id"] == preset_id:
+            return preset
+    raise HTTPException(status_code=400, detail=f"未知模型预设：{preset_id}")
+
+
+def normalize_optional_text(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = value.strip()
+    return normalized or None
 
 
 def count_high_risk_answers(db: Session) -> int:

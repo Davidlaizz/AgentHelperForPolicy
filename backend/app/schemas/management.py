@@ -95,3 +95,69 @@ class PolicyChunkListResponse(BaseModel):
     limit: int
     offset: int
     results: list[PolicyChunkAdminResponse]
+
+
+class ModelServicePresetResponse(BaseModel):
+    id: str
+    label: str
+    provider: str
+    model: str
+    api_url: str | None = None
+    description: str
+    keep_current_api_key: bool = True
+
+
+class ModelServiceConfigResponse(BaseModel):
+    provider: str
+    model: str
+    api_url: str | None = None
+    api_key_status: str
+    api_key_masked: str | None = None
+    max_tokens: int | None = None
+    timeout_seconds: int
+    thinking_type: str | None = None
+    compatible_protocol: str
+    editable_fields: list[str]
+    available_presets: list[ModelServicePresetResponse]
+
+
+class ModelServiceUpdateRequest(BaseModel):
+    preset_id: str | None = None
+    provider: str | None = Field(default=None, min_length=1, max_length=40)
+    model: str | None = Field(default=None, min_length=1, max_length=120)
+    api_url: str | None = None
+    api_key: str | None = None
+    max_tokens: int | None = Field(default=None, ge=1, le=32000)
+    timeout_seconds: int | None = Field(default=None, ge=5, le=600)
+    thinking_type: str | None = None
+    clear_api_key: bool = False
+
+
+class RagServiceConfigResponse(BaseModel):
+    embedding_provider: str
+    embedding_model: str
+    embedding_dimensions: int
+    embedding_api_url: str | None = None
+    embedding_api_key_status: str
+    embedding_api_key_masked: str | None = None
+    vector_schema: str
+    vector_table: str
+    editable_fields: list[str]
+
+
+class AgentGovernanceConfigResponse(BaseModel):
+    graph_version: str
+    node_count: int
+    edge_count: int
+    orchestration_framework: str
+    editable_items: list[str]
+    runtime_observability: bool
+
+
+class SystemConfigResponse(BaseModel):
+    model_service: ModelServiceConfigResponse
+    rag_service: RagServiceConfigResponse
+    agent_governance: AgentGovernanceConfigResponse
+    edit_mode: str
+    edit_note: str
+    updated_at: datetime
