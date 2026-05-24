@@ -19,7 +19,7 @@ AGENT_NODE_DEFINITIONS = [
         "type": "reasoning",
         "description": "识别用户是问政策、判资格、要材料还是要流程。",
         "input_keys": ["question"],
-        "output_keys": ["intent"],
+        "output_keys": ["intent", "intent_analysis"],
     },
     {
         "id": "case",
@@ -35,7 +35,7 @@ AGENT_NODE_DEFINITIONS = [
         "type": "memory",
         "description": "抽取用户条件，更新事项槽位和短期/长期记忆。",
         "input_keys": ["question", "case_id", "memory"],
-        "output_keys": ["extracted_slots", "case_slots", "missing_slots", "memory_updates"],
+        "output_keys": ["extracted_slots", "slot_analysis", "case_slots", "missing_slots", "memory_updates"],
     },
     {
         "id": "retrieval",

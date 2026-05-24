@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from pydantic import BaseModel
+from typing import Any
+
+from pydantic import BaseModel, Field
 
 
 class AgentSlotStatus(BaseModel):
@@ -44,5 +46,6 @@ class AgentResponse(BaseModel):
     material_list: list[str]
     workflow_steps: list[str]
     risk: AgentRiskResponse
+    evidence_summary: dict[str, Any] = Field(default_factory=dict)
     memory_updates: list[str]
-    execution_trace: list[dict] = []
+    execution_trace: list[dict] = Field(default_factory=list)

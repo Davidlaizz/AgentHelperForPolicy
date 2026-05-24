@@ -13,6 +13,7 @@ class PolicyAgentState(TypedDict, total=False):
     include_expired: bool
 
     intent: str | None
+    intent_analysis: dict[str, Any]
     case_type: str | None
     case_id: str | None
 
@@ -22,6 +23,7 @@ class PolicyAgentState(TypedDict, total=False):
     recent_messages: list[dict[str, str]]
 
     extracted_slots: dict[str, Any]
+    slot_analysis: dict[str, Any]
     missing_slots: list[dict[str, Any]]
     case_slots: list[dict[str, Any]]
     follow_up_questions: list[str]

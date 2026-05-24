@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from datetime import date
 from typing import Any
 
 from langchain_core.prompts import PromptTemplate
 from sqlalchemy.orm import Session
 
 from app.models import CaseSlot, ChatSession, ServiceCase
+from app.services.answer_sections import split_answer_sections
 from app.services.agent.orchestrator import (
     AgentRunState,
     build_eligibility_record,
@@ -23,12 +25,11 @@ from app.services.agent.rules import (
     INTENT_WORKFLOW,
     build_material_list,
     build_workflow_steps,
-    classify_intent,
     detect_case_type,
     enrich_retrieval_query,
-    extract_slots,
     policy_category_for_case,
 )
+from app.services.agent_graph.structured import classify_intent_structured, extract_slots_structured
 from app.services.llm_provider import get_llm_provider
 from app.services.memory import read_memory_snapshot, record_memory_item
 from app.services.memory.store import MemorySnapshot
@@ -68,7 +69,14 @@ class IntentAgent(BaseGraphAgent):
     node_name = "IntentAgent"
 
     def run(self, state: PolicyAgentState) -> dict[str, Any]:
-        return {"intent": classify_intent(state["question"])}
+        result = classify_intent_structured(state["question"])
+        return {
+            "intent": result.intent,
+            "intent_analysis": {
+                "confidence": result.confidence,
+                "reason": result.reason,
+            },
+        }
 
 
 class CaseAgent(BaseGraphAgent):
@@ -93,7 +101,8 @@ class SlotAgent(BaseGraphAgent):
         if case is None:
             return {"extracted_slots": {}, "case_slots": [], "missing_slots": []}
 
-        extracted_slots = extract_slots(state["question"])
+        slot_result = extract_slots_structured(state["question"], state.get("case_type") or case.case_type)
+        extracted_slots = slot_result.extracted_slots
         intent = state.get("intent") or INTENT_POLICY_QA
         if extracted_slots and intent == INTENT_POLICY_QA:
             intent = INTENT_ELIGIBILITY
@@ -116,6 +125,10 @@ class SlotAgent(BaseGraphAgent):
         return {
             "intent": intent,
             "extracted_slots": extracted_slots,
+            "slot_analysis": {
+                "confidence": slot_result.confidence,
+                "reason": slot_result.reason,
+            },
             "case_slots": [slot_to_dict(slot) for slot in slots],
             "missing_slots": [slot_to_dict(slot) for slot in slots if slot.required and slot.status == "missing"],
             "memory_updates": list(state.get("memory_updates") or []) + memory_updates,
@@ -160,16 +173,41 @@ class EvidenceAgent(BaseGraphAgent):
         attachments = []
         expired = []
         levels: dict[str, int] = {}
+        school_level_titles = []
+        college_level_titles = []
+        annual_notice_titles = []
+        unknown_level_titles = []
+        missing_effective_date_titles = []
+        attachment_chunk_count = 0
+        today = date.today()
+
         for item in chunks:
-            if item.get("document_title") not in titles:
-                titles.append(item.get("document_title"))
+            title = item.get("document_title") or "未知政策文件"
+            level = item.get("policy_level") or "未知"
+            effective_from = item.get("effective_from")
+            effective_to = item.get("effective_to")
             metadata = item.get("metadata") or {}
+
+            if title not in titles:
+                titles.append(title)
             if metadata.get("attachment_title") and metadata.get("attachment_title") not in attachments:
                 attachments.append(metadata.get("attachment_title"))
-            if item.get("effective_to"):
-                expired.append(item.get("document_title"))
-            level = item.get("policy_level") or "未知"
+            if item.get("attachment_id") or metadata.get("attachment_title"):
+                attachment_chunk_count += 1
+            if effective_to and effective_to < today:
+                expired.append(title)
+            if not effective_from and not effective_to:
+                missing_effective_date_titles.append(title)
+
             levels[level] = levels.get(level, 0) + 1
+            if level in {"校级", "学校", "学校通用政策"}:
+                school_level_titles.append(title)
+            elif level in {"院级", "学院", "学院细则"}:
+                college_level_titles.append(title)
+            elif level in {"年度通知", "通知", "临时通知"}:
+                annual_notice_titles.append(title)
+            else:
+                unknown_level_titles.append(title)
 
         return {
             "evidence_summary": {
@@ -179,6 +217,12 @@ class EvidenceAgent(BaseGraphAgent):
                 "policy_levels": levels,
                 "has_expired_candidates": bool(expired),
                 "expired_titles": sorted(set(expired))[:5],
+                "school_level_titles": unique_head(school_level_titles, 5),
+                "college_level_titles": unique_head(college_level_titles, 5),
+                "annual_notice_titles": unique_head(annual_notice_titles, 5),
+                "unknown_level_titles": unique_head(unknown_level_titles, 5),
+                "missing_effective_date_titles": unique_head(missing_effective_date_titles, 5),
+                "attachment_only": bool(chunks) and attachment_chunk_count == len(chunks),
             },
             "citations": [
                 {
@@ -245,7 +289,33 @@ class RiskAgent(BaseGraphAgent):
             retrieved=state.get("retrieved_chunks") or [],
             answer=state.get("final_answer") or "",
         )
-        return {"risk": risk.model_dump()}
+        risk_data = risk.model_dump()
+        evidence = state.get("evidence_summary") or {}
+        warnings = list(risk_data.get("warnings") or [])
+        risk_level = risk_data.get("risk_level") or "low"
+
+        if evidence.get("missing_effective_date_titles"):
+            warnings.append(
+                "部分政策缺少明确生效时间或失效时间，涉及时效性结论时建议人工复核。"
+            )
+            risk_level = upgrade_risk(risk_level, "medium")
+        if evidence.get("expired_titles") and not any("可能已过期政策" in warning for warning in warnings):
+            warnings.append(
+                f"证据分层发现可能已过期政策：{', '.join(evidence['expired_titles'])}"
+            )
+            risk_level = upgrade_risk(risk_level, "medium")
+        if evidence.get("school_level_titles") and evidence.get("college_level_titles"):
+            warnings.append(
+                "检索结果同时包含学校通用政策和学院细则，应按适用学院、年级和具体通知核对最终口径。"
+            )
+            risk_level = upgrade_risk(risk_level, "medium")
+        if evidence.get("attachment_only"):
+            warnings.append("当前证据主要来自附件材料，应结合政策正文或发布通知确认办理条件。")
+            risk_level = upgrade_risk(risk_level, "medium")
+
+        risk_data["warnings"] = unique_head(warnings, 8)
+        risk_data["risk_level"] = risk_level
+        return {"risk": risk_data}
 
 
 class AnswerAgent(BaseGraphAgent):
@@ -305,8 +375,11 @@ def build_langchain_policy_prompt(state: PolicyAgentState) -> str:
         )
 
     template = PromptTemplate.from_template(
-        "请基于以下政策片段回答问题。必须区分“政策依据”和“AI 推断”；"
-        "如果片段不足以支持结论，要明确说明不确定。\n\n"
+        "请基于以下政策片段回答问题。输出必须包含两个一级小节：\n"
+        "1. 政策依据：只写政策片段能直接支持的条款、条件、材料、流程或出处。\n"
+        "2. AI 推断：只写基于政策依据和用户条件得到的判断、仍需补充的信息、下一步建议。\n"
+        "如果片段不足以支持结论，要在 AI 推断中明确说明不确定点，不要把不确定点写成政策依据。\n"
+        "不要把“政策依据”或“AI 推断”标题重复多次。\n\n"
         "用户问题：{question}\n\n"
         "政策片段：\n{contexts}\n\n"
         "Agent 编排上下文：\n{agent_context}\n"
@@ -422,6 +495,7 @@ def agent_response_from_state(state: PolicyAgentState) -> dict[str, Any]:
         "material_list": state.get("material_list") or [],
         "workflow_steps": state.get("workflow_steps") or [],
         "risk": state.get("risk") or {"risk_level": "low", "warnings": []},
+        "evidence_summary": state.get("evidence_summary") or {},
         "memory_updates": state.get("memory_updates") or [],
         "execution_trace": state.get("execution_trace") or [],
     }
@@ -431,8 +505,16 @@ def format_memory(memory: dict[str, Any]) -> str:
     return "，".join(f"{key}={value}" for key, value in memory.items())
 
 
-def split_answer_sections(answer: str) -> tuple[str, str]:
-    if "AI 推断：" not in answer:
-        return answer.strip(), "未生成额外推断。"
-    basis, inference = answer.split("AI 推断：", 1)
-    return basis.replace("政策依据：", "").strip(), inference.strip()
+def unique_head(values: list[Any], limit: int) -> list[Any]:
+    result = []
+    for value in values:
+        if value and value not in result:
+            result.append(value)
+        if len(result) >= limit:
+            break
+    return result
+
+
+def upgrade_risk(current: str, target: str) -> str:
+    order = {"low": 0, "medium": 1, "high": 2}
+    return target if order.get(target, 0) > order.get(current, 0) else current
