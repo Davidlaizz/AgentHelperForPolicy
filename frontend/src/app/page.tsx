@@ -1,11 +1,16 @@
 import Link from "next/link";
 import {
   ArrowRight,
+  BadgeCheck,
   BookOpenCheck,
+  BrainCircuit,
+  Database,
   FileCheck2,
   FileSearch,
   GraduationCap,
   Library,
+  MessageSquareText,
+  Network,
   Route,
   ShieldCheck,
   Sparkles,
@@ -52,11 +57,53 @@ const caseCards = [
 ];
 
 const demoFlow = [
-  "管理员上传政策和附件",
-  "系统解析并构建知识库",
-  "学生自然语言提问",
-  "Agent 追问缺失条件",
-  "输出资格判断和办理路径",
+  {
+    code: "01",
+    title: "Policy Ingestion",
+    description: "政策与附件可信入库",
+    tags: ["PDF/DOCX", "metadata", "有效期"],
+    icon: FileCheck2,
+  },
+  {
+    code: "02",
+    title: "Knowledge Indexing",
+    description: "解析切块并构建向量知识库",
+    tags: ["chunking", "embedding", "pgvector"],
+    icon: Database,
+  },
+  {
+    code: "03",
+    title: "Natural Query",
+    description: "学生自然语言发起咨询",
+    tags: ["intent", "case", "slot"],
+    icon: MessageSquareText,
+  },
+  {
+    code: "04",
+    title: "Agent Reasoning",
+    description: "多 Agent 编排、追问与风险校验",
+    tags: ["LangGraph", "memory", "risk"],
+    icon: BrainCircuit,
+  },
+  {
+    code: "05",
+    title: "Trusted Output",
+    description: "生成资格判断、材料清单与办理路径",
+    tags: ["citation", "workflow", "trace"],
+    icon: BadgeCheck,
+  },
+];
+
+const demoMetrics = [
+  { label: "Agent Nodes", value: "12" },
+  { label: "Knowledge Chunks", value: "113" },
+  { label: "Trace Mode", value: "ON" },
+];
+
+const trustCapabilities = [
+  { title: "可追溯", description: "回答绑定政策片段、附件和出处" },
+  { title: "可解释", description: "展示条件、缺口和推断边界" },
+  { title: "可观测", description: "后台还原 Agent 路由与运行轨迹" },
 ];
 
 export default function Home() {
@@ -159,33 +206,83 @@ export default function Home() {
           </div>
         </SectionCard>
 
-        <SectionCard
-          title="Demo 闭环"
-          description="路演时按这个顺序展示，系统价值最清晰。"
-        >
-          <div className="space-y-3">
-            {demoFlow.map((item, index) => (
-              <div key={item} className="flex gap-3">
-                <div className="flex size-7 shrink-0 items-center justify-center rounded-md bg-primary text-xs text-primary-foreground">
-                  {index + 1}
+        <div className="overflow-hidden rounded-lg border border-border bg-card">
+          <div className="border-b border-border bg-blue-50/60 px-5 py-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-2 text-xs font-medium text-blue-700">
+                  <Network className="size-4" />
+                  Agentic Policy Service Pipeline
                 </div>
-                <div>
-                  <p className="text-sm font-medium text-foreground">{item}</p>
-                  {index < demoFlow.length - 1 ? (
-                    <div className="mt-3 h-5 w-px bg-border" />
-                  ) : null}
-                </div>
+                <h2 className="mt-2 text-xl font-semibold text-foreground">智能体政策服务闭环</h2>
+                <p className="mt-2 max-w-xl text-sm leading-6 text-muted-foreground">
+                  从政策入库、知识建模、自然语言咨询到可信服务输出的端到端演示链路。
+                </p>
               </div>
-            ))}
+              <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700">
+                TRACE ENABLED
+              </div>
+            </div>
+            <div className="mt-4 grid gap-2 sm:grid-cols-3">
+              {demoMetrics.map((item) => (
+                <div key={item.label} className="rounded-md border border-blue-100 bg-background px-3 py-2">
+                  <p className="text-[11px] uppercase text-muted-foreground">{item.label}</p>
+                  <p className="mt-1 text-lg font-semibold text-foreground">{item.value}</p>
+                </div>
+              ))}
+            </div>
           </div>
-          <Link
-            href="/admin"
-            className="mt-5 inline-flex h-9 items-center gap-2 rounded-md bg-primary px-3 text-sm text-primary-foreground"
-          >
-            <BookOpenCheck className="size-4" />
-            进入后台演示
-          </Link>
-        </SectionCard>
+
+          <div className="space-y-4 p-5">
+            <div className="grid gap-3">
+              {demoFlow.map(({ code, title, description, tags, icon: Icon }, index) => (
+                <div key={code} className="relative rounded-md border border-border bg-background p-3">
+                  {index < demoFlow.length - 1 ? (
+                    <div className="absolute left-[27px] top-12 h-8 w-px bg-border" />
+                  ) : null}
+                  <div className="flex gap-3">
+                    <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground">
+                      <Icon className="size-4" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">
+                          {code}
+                        </span>
+                        <p className="text-sm font-semibold text-foreground">{title}</p>
+                      </div>
+                      <p className="mt-1 text-sm text-muted-foreground">{description}</p>
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {tags.map((tag) => (
+                          <span key={tag} className="rounded-md bg-blue-50 px-2 py-1 text-[11px] text-blue-700">
+                            {tag}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="grid gap-2 sm:grid-cols-3">
+              {trustCapabilities.map((item) => (
+                <div key={item.title} className="rounded-md border border-border bg-muted/30 p-3">
+                  <p className="text-sm font-semibold text-foreground">{item.title}</p>
+                  <p className="mt-1 text-xs leading-5 text-muted-foreground">{item.description}</p>
+                </div>
+              ))}
+            </div>
+
+            <Link
+              href="/admin"
+              className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-3 text-sm text-primary-foreground"
+            >
+              <BookOpenCheck className="size-4" />
+              查看 Agent 治理后台
+            </Link>
+          </div>
+        </div>
       </section>
     </div>
   );

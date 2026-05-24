@@ -1,7 +1,7 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
-import type { ReactNode } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { MouseEvent as ReactMouseEvent, ReactNode } from "react";
 import {
   BarChart3,
   BookOpenCheck,
@@ -9,6 +9,7 @@ import {
   FileText,
   GitBranch,
   MessageSquareText,
+  Pencil,
   RefreshCw,
   RotateCcw,
   Save,
@@ -16,6 +17,8 @@ import {
   Trash2,
   Upload,
   Workflow,
+  ZoomIn,
+  ZoomOut,
 } from "lucide-react";
 
 import { SectionCard } from "@/components/section-card";
@@ -145,6 +148,27 @@ type GraphSelection =
   | { kind: "edge"; id: string }
   | null;
 
+type AdminTab = "overview" | "knowledge" | "operations" | "agents" | "settings";
+type DocumentStatusFilter = "all" | "active" | "inactive";
+
+const DOCUMENT_PAGE_SIZE = 10;
+const AGENT_SPLIT_STORAGE_KEY = "zhicetong.admin.agentGraphSplitRatio";
+const AGENT_SPLIT_DEFAULT_RATIO = 0.72;
+const AGENT_SPLIT_MIN_RATIO = 0.55;
+const AGENT_SPLIT_MAX_RATIO = 0.82;
+const AGENT_SPLIT_HANDLE_WIDTH = 10;
+const AGENT_SPLIT_GRAPH_MIN_WIDTH = 260;
+const AGENT_SPLIT_DETAIL_MIN_WIDTH = 200;
+const RUNTIME_SUMMARY_PREVIEW_LENGTH = 120;
+
+const adminTabs: { id: AdminTab; label: string; description: string }[] = [
+  { id: "overview", label: "总览工作台", description: "指标、状态和关键入口" },
+  { id: "knowledge", label: "政策知识库", description: "文件、解析、metadata" },
+  { id: "operations", label: "问答运营", description: "热门问题和标准答案" },
+  { id: "agents", label: "Agent 治理", description: "编排图、运行轨迹、节点治理" },
+  { id: "settings", label: "系统配置", description: "模型、检索和治理配置" },
+];
+
 const apiBaseUrl =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000";
 
@@ -172,21 +196,125 @@ const conditionLabels: Record<string, string> = {
   policy_qa_or_general: "普通问答",
 };
 
+const graphCanvas = { width: 1320, height: 620 };
+const graphZoom = { min: 0.6, max: 1.6, step: 0.1, default: 0.6 };
+
 const graphNodePositions: Record<string, { x: number; y: number; width: number; height: number; layer: string }> = {
-  start: { x: 30, y: 318, width: 80, height: 42, layer: "入口" },
-  memory_read: { x: 140, y: 300, width: 150, height: 78, layer: "记忆" },
-  intent: { x: 320, y: 300, width: 150, height: 78, layer: "理解" },
-  case: { x: 500, y: 300, width: 150, height: 78, layer: "理解" },
-  slot: { x: 680, y: 300, width: 150, height: 78, layer: "理解" },
-  retrieval: { x: 860, y: 300, width: 150, height: 78, layer: "知识" },
-  evidence: { x: 1040, y: 300, width: 150, height: 78, layer: "知识" },
-  followup: { x: 1220, y: 160, width: 150, height: 78, layer: "分支" },
-  eligibility: { x: 1220, y: 300, width: 150, height: 78, layer: "分支" },
-  workflow: { x: 1220, y: 440, width: 150, height: 78, layer: "分支" },
-  risk: { x: 1400, y: 300, width: 150, height: 78, layer: "治理" },
-  answer: { x: 1400, y: 440, width: 150, height: 78, layer: "生成" },
-  memory_write: { x: 1400, y: 560, width: 150, height: 78, layer: "记忆" },
-  end: { x: 1435, y: 680, width: 80, height: 42, layer: "结束" },
+  start: { x: 58, y: 258, width: 74, height: 42, layer: "入口" },
+  memory_read: { x: 162, y: 240, width: 146, height: 78, layer: "记忆" },
+  intent: { x: 352, y: 240, width: 146, height: 78, layer: "理解" },
+  case: { x: 542, y: 240, width: 146, height: 78, layer: "理解" },
+  slot: { x: 732, y: 240, width: 146, height: 78, layer: "理解" },
+  retrieval: { x: 922, y: 240, width: 146, height: 78, layer: "知识" },
+  evidence: { x: 1112, y: 240, width: 146, height: 78, layer: "知识" },
+  followup: { x: 1112, y: 96, width: 146, height: 78, layer: "分支" },
+  eligibility: { x: 732, y: 468, width: 146, height: 78, layer: "分支" },
+  workflow: { x: 922, y: 468, width: 146, height: 78, layer: "分支" },
+  risk: { x: 1112, y: 468, width: 146, height: 78, layer: "治理" },
+  answer: { x: 542, y: 468, width: 146, height: 78, layer: "生成" },
+  memory_write: { x: 352, y: 468, width: 146, height: 78, layer: "记忆" },
+  end: { x: 202, y: 486, width: 74, height: 42, layer: "结束" },
+};
+
+const graphEdgeLabelPoints: Record<string, { x: number; y: number }> = {
+  "evidence->followup": { x: 1240, y: 204 },
+  "evidence->eligibility": { x: 888, y: 402 },
+  "evidence->workflow": { x: 1030, y: 382 },
+  "evidence->risk": { x: 1240, y: 438 },
+  "followup->risk": { x: 1262, y: 326 },
+  "eligibility->workflow": { x: 900, y: 452 },
+  "workflow->risk": { x: 1090, y: 452 },
+  "risk->answer": { x: 900, y: 584 },
+  "answer->memory_write": { x: 520, y: 488 },
+  "memory_write->end": { x: 324, y: 488 },
+};
+
+const graphEdgeBusinessLabels: Record<string, string> = {
+  "followup->risk": "追问校验",
+  "eligibility->workflow": "补齐流程",
+  "workflow->risk": "流程校验",
+  "risk->answer": "可信生成",
+};
+
+const graphEdgeRoutes: Record<string, [number, number][]> = {
+  "evidence->followup": [
+    [1185, 240],
+    [1185, 194],
+    [1185, 174],
+  ],
+  "evidence->eligibility": [
+    [1176, 318],
+    [1176, 414],
+    [805, 414],
+    [805, 468],
+  ],
+  "evidence->workflow": [
+    [1152, 318],
+    [1152, 398],
+    [995, 398],
+    [995, 468],
+  ],
+  "evidence->risk": [
+    [1202, 318],
+    [1202, 412],
+    [1202, 468],
+  ],
+  "followup->risk": [
+    [1258, 135],
+    [1294, 135],
+    [1294, 507],
+    [1258, 507],
+  ],
+  "workflow->risk": [
+    [1068, 507],
+    [1112, 507],
+  ],
+  "risk->answer": [
+    [1185, 546],
+    [1185, 584],
+    [615, 584],
+    [615, 546],
+  ],
+};
+
+const reactLoopEdges = [
+  {
+    id: "followup-slot-loop",
+    label: "用户补充后重入",
+    points: [
+      [1112, 135],
+      [805, 135],
+      [805, 240],
+    ] as [number, number][],
+    labelPoint: { x: 958, y: 124 },
+  },
+  {
+    id: "memory-feedback-loop",
+    label: "记忆反馈/下一轮",
+    points: [
+      [352, 507],
+      [118, 507],
+      [118, 356],
+      [235, 356],
+      [235, 318],
+    ] as [number, number][],
+    labelPoint: { x: 174, y: 376 },
+  },
+];
+
+const agentDisplayNames: Record<string, string> = {
+  memory_read: "记忆读取",
+  intent: "意图识别",
+  case: "事项识别",
+  slot: "槽位抽取",
+  retrieval: "RAG 检索",
+  evidence: "证据整理",
+  followup: "缺口追问",
+  eligibility: "资格判断",
+  workflow: "流程材料",
+  risk: "风险校验",
+  answer: "答案生成",
+  memory_write: "记忆写入",
 };
 
 export default function AdminPage() {
@@ -203,12 +331,38 @@ export default function AdminPage() {
   const [autoParse, setAutoParse] = useState(true);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
+  const [activeAdminTab, setActiveAdminTab] = useState<AdminTab>("overview");
+  const [documentStatusFilter, setDocumentStatusFilter] = useState<DocumentStatusFilter>("all");
+  const [documentPage, setDocumentPage] = useState(1);
+  const [editingDocumentId, setEditingDocumentId] = useState<string | null>(null);
   const [graphSelection, setGraphSelection] = useState<GraphSelection>({ kind: "node", id: "memory_read" });
 
   const mainDocuments = useMemo(
     () => documents.filter((document) => !document.is_attachment && document.is_active),
     [documents],
   );
+  const filteredDocuments = useMemo(() => {
+    if (documentStatusFilter === "active") {
+      return documents.filter((document) => document.is_active);
+    }
+    if (documentStatusFilter === "inactive") {
+      return documents.filter((document) => !document.is_active);
+    }
+    return documents;
+  }, [documentStatusFilter, documents]);
+  const activeDocumentCount = useMemo(
+    () => documents.filter((document) => document.is_active).length,
+    [documents],
+  );
+  const inactiveDocumentCount = documents.length - activeDocumentCount;
+  const documentTotalPages = Math.max(1, Math.ceil(filteredDocuments.length / DOCUMENT_PAGE_SIZE));
+  const normalizedDocumentPage = Math.min(documentPage, documentTotalPages);
+  const paginatedDocuments = useMemo(() => {
+    const start = (normalizedDocumentPage - 1) * DOCUMENT_PAGE_SIZE;
+    return filteredDocuments.slice(start, start + DOCUMENT_PAGE_SIZE);
+  }, [filteredDocuments, normalizedDocumentPage]);
+  const documentPageStart = filteredDocuments.length === 0 ? 0 : (normalizedDocumentPage - 1) * DOCUMENT_PAGE_SIZE + 1;
+  const documentPageEnd = Math.min(normalizedDocumentPage * DOCUMENT_PAGE_SIZE, filteredDocuments.length);
   const selectedNode = useMemo(() => {
     if (graphSelection?.kind !== "node") {
       return null;
@@ -392,6 +546,28 @@ export default function AdminPage() {
     }
   }
 
+  async function enableDocument(document: PolicyDocument) {
+    setLoading(true);
+    setMessage("");
+    try {
+      const response = await fetch(`${apiBaseUrl}/api/documents/${document.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ is_active: true }),
+      });
+      const body = await response.json();
+      if (!response.ok) {
+        throw new Error(body.detail ?? "启用失败");
+      }
+      setMessage(`已启用：${body.title}`);
+      await loadAll();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "启用失败");
+    } finally {
+      setLoading(false);
+    }
+  }
+
   async function createStandardAnswer(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = event.currentTarget;
@@ -452,7 +628,7 @@ export default function AdminPage() {
 
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-1 flex-col gap-6 px-6 py-6">
-      <SectionCard title="管理后台" description="政策知识库、运营指标、热门问题和标准答案维护。">
+      <SectionCard title="管理后台" description="政策智能服务运营与治理中心。">
         <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
           <Metric icon={<FileText className="size-4" />} label="政策文件" value={dashboard?.document_count ?? 0} />
           <Metric icon={<BookOpenCheck className="size-4" />} label="已解析" value={dashboard?.parsed_document_count ?? 0} />
@@ -468,8 +644,57 @@ export default function AdminPage() {
           </Button>
           {message ? <p className="text-sm text-muted-foreground">{message}</p> : null}
         </div>
+        <div className="mt-5 grid gap-2 rounded-xl border border-border bg-muted/20 p-2 md:grid-cols-5">
+          {adminTabs.map((tab) => {
+            const active = activeAdminTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                className={
+                  active
+                    ? "rounded-lg border border-primary bg-background px-3 py-2 text-left shadow-sm"
+                    : "rounded-lg border border-transparent px-3 py-2 text-left hover:border-border hover:bg-background"
+                }
+                onClick={() => setActiveAdminTab(tab.id)}
+              >
+                <span className={active ? "block text-sm font-medium text-primary" : "block text-sm font-medium text-foreground"}>
+                  {tab.label}
+                </span>
+                <span className="mt-1 block text-xs text-muted-foreground">{tab.description}</span>
+              </button>
+            );
+          })}
+        </div>
       </SectionCard>
 
+      {activeAdminTab === "overview" ? (
+        <div className="grid gap-6 xl:grid-cols-3">
+          <SectionCard title="知识库概况" description="政策文件解析、索引和可检索资产状态。">
+            <div className="grid gap-3">
+              <Metric icon={<FileText className="size-4" />} label="有效文件" value={dashboard?.active_document_count ?? 0} />
+              <Metric icon={<BookOpenCheck className="size-4" />} label="已解析文件" value={dashboard?.parsed_document_count ?? 0} />
+              <Metric icon={<BarChart3 className="size-4" />} label="知识切片" value={dashboard?.chunk_count ?? 0} />
+            </div>
+          </SectionCard>
+          <SectionCard title="问答运营" description="高频咨询、人工标准答案和风险复核入口。">
+            <div className="grid gap-3">
+              <Metric icon={<MessageSquareText className="size-4" />} label="今日问答" value={dashboard?.today_question_count ?? 0} />
+              <Metric icon={<BarChart3 className="size-4" />} label="热门问题" value={dashboard?.hot_question_count ?? 0} />
+              <Metric icon={<BookOpenCheck className="size-4" />} label="标准答案" value={dashboard?.standard_answer_count ?? 0} />
+            </div>
+          </SectionCard>
+          <SectionCard title="Agent 治理" description="多 Agent 架构、运行轨迹和风险状态。">
+            <div className="grid gap-3">
+              <Metric icon={<Workflow className="size-4" />} label="Agent 节点" value={agentGraph?.nodes.length ?? 0} />
+              <Metric icon={<GitBranch className="size-4" />} label="路由边" value={agentGraph?.edges.length ?? 0} />
+              <Metric icon={<ShieldAlert className="size-4" />} label="高风险回答" value={dashboard?.high_risk_answer_count ?? 0} />
+            </div>
+          </SectionCard>
+        </div>
+      ) : null}
+
+      {activeAdminTab === "agents" ? (
       <SectionCard title="Agent 架构与运行轨迹" description="展示 LangGraph 多 Agent 编排节点、条件路由和最近运行状态。">
         <div className="mb-4 grid gap-3 md:grid-cols-3">
           <Metric icon={<Workflow className="size-4" />} label="Agent 节点" value={agentGraph?.nodes.length ?? 0} />
@@ -477,17 +702,28 @@ export default function AdminPage() {
           <Metric icon={<Activity className="size-4" />} label="最近运行" value={agentRuns.length} />
         </div>
 
-        <div className="grid gap-5 xl:grid-cols-[1.1fr_0.9fr]">
+        <div className="space-y-5">
           <div className="space-y-3">
             <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
               <span className="font-medium text-foreground">{agentGraph?.version ?? "未加载"}</span>
               <span>{agentGraph?.description ?? "暂无 Agent 编排信息"}</span>
             </div>
-            <AgentFlowDiagram
-              graph={agentGraph}
-              selectedSteps={agentRunDetail?.steps ?? []}
-              selection={graphSelection}
-              onSelect={setGraphSelection}
+            <ResizableAgentSplit
+              left={
+              <AgentFlowDiagram
+                graph={agentGraph}
+                selectedSteps={agentRunDetail?.steps ?? []}
+                selection={graphSelection}
+                onSelect={setGraphSelection}
+              />
+              }
+              right={
+              <GraphSelectionPanel
+                node={selectedNode}
+                edge={selectedEdge}
+                step={selectedStep}
+              />
+              }
             />
             <div className="grid gap-3 md:grid-cols-2">
               {(agentGraph?.nodes ?? []).map((node) => (
@@ -525,94 +761,20 @@ export default function AdminPage() {
                 <p className="text-sm text-muted-foreground">暂无 Agent 节点信息</p>
               ) : null}
             </div>
-            <AgentGovernanceTable nodes={agentGraph?.nodes ?? []} />
-          </div>
-
-          <div className="space-y-4">
-            <GraphSelectionPanel
-              node={selectedNode}
-              edge={selectedEdge}
-              step={selectedStep}
+            <RunObservabilityPanel
+              runs={agentRuns}
+              detail={agentRunDetail}
+              loading={loading}
+              onSelectRun={loadAgentRunDetail}
             />
-
-            <div className="rounded-lg border border-border">
-              <div className="border-b border-border px-3 py-2 text-sm font-medium text-foreground">
-                最近运行
-              </div>
-              <div className="divide-y divide-border">
-                {agentRuns.map((run) => (
-                  <div key={run.run_id} className="px-3 py-3">
-                    <div className="flex items-start justify-between gap-3">
-                      <p className="line-clamp-2 text-sm font-medium leading-6 text-foreground">{run.question}</p>
-                      <div className="flex shrink-0 items-center gap-2">
-                        <span className="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
-                          {run.status}
-                        </span>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={() => loadAgentRunDetail(run.run_id)}
-                        >
-                          查看
-                        </Button>
-                      </div>
-                    </div>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      {run.intent ?? "unknown"} / {run.case_type ?? "general"} / {run.risk_level ?? "未评估"} / {run.duration_ms ?? 0}ms
-                    </p>
-                    <p className="mt-1 text-xs text-muted-foreground">{formatDateTime(run.started_at)}</p>
-                  </div>
-                ))}
-                {agentRuns.length === 0 ? (
-                  <p className="px-3 py-6 text-sm text-muted-foreground">暂无 Agent 运行记录</p>
-                ) : null}
-              </div>
-            </div>
-
-            <div className="rounded-lg border border-border">
-              <div className="border-b border-border px-3 py-2 text-sm font-medium text-foreground">
-                运行详情
-              </div>
-              <div className="max-h-96 divide-y divide-border overflow-auto">
-                {agentRunDetail ? (
-                  <div className="px-3 py-3">
-                    <p className="line-clamp-2 text-sm font-medium leading-6 text-foreground">
-                      {agentRunDetail.run.question}
-                    </p>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      {agentRunDetail.run.intent ?? "unknown"} / {agentRunDetail.run.case_type ?? "general"} / {agentRunDetail.run.risk_level ?? "未评估"} / {agentRunDetail.run.duration_ms ?? 0}ms
-                    </p>
-                  </div>
-                ) : null}
-                {(agentRunDetail?.steps ?? []).map((step) => (
-                  <div key={step.id} className="px-3 py-3">
-                    <div className="flex items-center justify-between gap-3">
-                      <p className="truncate text-sm font-medium text-foreground">{step.node_name}</p>
-                      <span className="shrink-0 text-xs text-muted-foreground">
-                        {step.status} / {step.duration_ms ?? 0}ms
-                      </span>
-                    </div>
-                    <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">
-                      {step.output_summary ?? step.error_message ?? step.input_summary ?? "无摘要"}
-                    </p>
-                    <details className="mt-2 text-xs leading-5 text-muted-foreground">
-                      <summary className="cursor-pointer text-foreground">查看输入/输出摘要</summary>
-                      <p className="mt-2 break-words">输入：{step.input_summary ?? "无"}</p>
-                      <p className="mt-1 break-words">输出：{step.output_summary ?? "无"}</p>
-                      {step.error_message ? <p className="mt-1 text-red-600">错误：{step.error_message}</p> : null}
-                    </details>
-                  </div>
-                ))}
-                {!agentRunDetail?.steps.length ? (
-                  <p className="px-3 py-6 text-sm text-muted-foreground">暂无执行步骤</p>
-                ) : null}
-              </div>
-            </div>
+            <AgentGovernanceTable nodes={agentGraph?.nodes ?? []} />
           </div>
         </div>
       </SectionCard>
+      ) : null}
 
+      {activeAdminTab === "knowledge" ? (
+        <>
       <SectionCard title="政策文件上传" description="上传政策主文件或附件，并录入可参与检索过滤的 metadata。">
         <form onSubmit={handleUpload} className="grid gap-4 lg:grid-cols-[1fr_1fr]">
           <div className="space-y-4">
@@ -695,6 +857,31 @@ export default function AdminPage() {
       </SectionCard>
 
       <SectionCard title="政策文件管理" description="查看解析状态、chunk 数量，并维护文件 metadata。">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <label className="flex items-center gap-2 text-sm font-medium text-foreground">
+              <span>状态筛选</span>
+              <select
+                value={documentStatusFilter}
+                onChange={(event) => {
+                  setDocumentStatusFilter(event.target.value as DocumentStatusFilter);
+                  setDocumentPage(1);
+                }}
+                className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+              >
+                <option value="all">全部（{documents.length}）</option>
+                <option value="active">启用（{activeDocumentCount}）</option>
+                <option value="inactive">禁用（{inactiveDocumentCount}）</option>
+              </select>
+            </label>
+            <span className="text-xs text-muted-foreground">每页最多 {DOCUMENT_PAGE_SIZE} 个文件</span>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            {filteredDocuments.length === 0
+              ? "当前筛选下暂无文件"
+              : `显示 ${documentPageStart}-${documentPageEnd} / 共 ${filteredDocuments.length} 个文件`}
+          </p>
+        </div>
         <div className="overflow-hidden rounded-lg border border-border">
           <table className="w-full table-fixed border-collapse text-left text-sm">
             <thead className="bg-muted/70 text-xs text-muted-foreground">
@@ -708,17 +895,22 @@ export default function AdminPage() {
               </tr>
             </thead>
             <tbody>
-              {documents.map((document) => (
+              {paginatedDocuments.map((document) => (
                 <DocumentRow
                   key={document.id}
                   document={document}
                   loading={loading}
+                  isEditing={editingDocumentId === document.id}
+                  onToggleEdit={() =>
+                    setEditingDocumentId((current) => (current === document.id ? null : document.id))
+                  }
                   onRetry={() => retryParse(document.id)}
                   onSave={(formData) => saveDocumentMetadata(document, formData)}
                   onDisable={() => disableDocument(document)}
+                  onEnable={() => enableDocument(document)}
                 />
               ))}
-              {documents.length === 0 ? (
+              {filteredDocuments.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="px-3 py-8 text-center text-sm text-muted-foreground">
                     暂无政策文件
@@ -728,8 +920,38 @@ export default function AdminPage() {
             </tbody>
           </table>
         </div>
+        {filteredDocuments.length > 0 ? (
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+            <p className="text-xs text-muted-foreground">
+              第 {normalizedDocumentPage} / {documentTotalPages} 页
+            </p>
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={normalizedDocumentPage <= 1}
+                onClick={() => setDocumentPage(Math.max(1, normalizedDocumentPage - 1))}
+              >
+                上一页
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={normalizedDocumentPage >= documentTotalPages}
+                onClick={() => setDocumentPage(Math.min(documentTotalPages, normalizedDocumentPage + 1))}
+              >
+                下一页
+              </Button>
+            </div>
+          </div>
+        ) : null}
       </SectionCard>
+        </>
+      ) : null}
 
+      {activeAdminTab === "operations" ? (
       <div className="grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
         <SectionCard title="热门问题看板" description="按用户咨询次数排序，辅助发现高频政策服务需求。">
           <div className="space-y-3">
@@ -809,6 +1031,32 @@ export default function AdminPage() {
           </div>
         </SectionCard>
       </div>
+      ) : null}
+
+      {activeAdminTab === "settings" ? (
+        <SectionCard title="系统配置" description="集中展示模型、RAG 和 Agent 治理配置；当前版本以只读说明为主。">
+          <div className="grid gap-4 md:grid-cols-3">
+            <div className="rounded-lg border border-border bg-background p-4">
+              <p className="text-sm font-medium text-foreground">模型服务</p>
+              <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                当前后端通过 OpenAI-compatible API 接入模型，可在后续扩展模型开关、温度、超时和降级策略。
+              </p>
+            </div>
+            <div className="rounded-lg border border-border bg-background p-4">
+              <p className="text-sm font-medium text-foreground">RAG 检索</p>
+              <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                知识库采用政策 metadata、有效期、附件关系和向量检索，后续可开放 top_k、过滤条件和重建索引配置。
+              </p>
+            </div>
+            <div className="rounded-lg border border-border bg-background p-4">
+              <p className="text-sm font-medium text-foreground">Agent 治理</p>
+              <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                当前支持节点观测、运行轨迹和风险校验，后续可开放节点启停、Prompt 编辑和日志保留策略。
+              </p>
+            </div>
+          </div>
+        </SectionCard>
+      ) : null}
     </div>
   );
 }
@@ -824,8 +1072,10 @@ function AgentFlowDiagram({
   selection: GraphSelection;
   onSelect: (selection: GraphSelection) => void;
 }) {
-  const executed = new Set(selectedSteps.map((step) => step.node_key));
+  const [zoom, setZoom] = useState(graphZoom.default);
+  const executed = new Set((graph?.nodes ?? []).map((node) => node.id));
   const failed = new Set(selectedSteps.filter((step) => step.status === "failed").map((step) => step.node_key));
+  const zoomPercent = Math.round(zoom * 100);
 
   if (!graph?.nodes.length) {
     return (
@@ -840,16 +1090,56 @@ function AgentFlowDiagram({
       <div className="mb-3 flex items-center justify-between gap-3">
         <div>
           <p className="text-sm font-medium text-foreground">多 Agent 编排图</p>
-          <p className="text-xs text-muted-foreground">一张图展示 Agent 节点、路由边、条件和最近运行命中情况。</p>
+          <p className="text-xs text-muted-foreground">
+            实线为当前 LangGraph 路由，虚线为跨轮次 ReAct 反馈闭环。
+          </p>
         </div>
-        <div className="flex shrink-0 flex-wrap gap-2 text-xs text-muted-foreground">
+        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 text-xs text-muted-foreground">
+          <div className="flex items-center gap-1 rounded-lg border border-border bg-background p-1">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              title="缩小"
+              onClick={() => setZoom((current) => clampGraphZoom(current - graphZoom.step))}
+            >
+              <ZoomOut />
+            </Button>
+            <button
+              type="button"
+              className="min-w-12 rounded-md px-2 py-1 text-xs font-medium text-foreground hover:bg-muted"
+              title="重置缩放"
+              onClick={() => setZoom(graphZoom.default)}
+            >
+              {zoomPercent}%
+            </button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              title="放大"
+              onClick={() => setZoom((current) => clampGraphZoom(current + graphZoom.step))}
+            >
+              <ZoomIn />
+            </Button>
+          </div>
           <span className="rounded-md bg-emerald-50 px-2 py-1 text-emerald-700">已执行</span>
           <span className="rounded-md bg-red-50 px-2 py-1 text-red-700">失败</span>
           <span className="rounded-md bg-muted px-2 py-1">未命中</span>
         </div>
       </div>
-      <div className="overflow-x-auto rounded-lg border border-border bg-muted/20">
-        <svg viewBox="0 0 1580 760" className="min-h-[560px] min-w-[1180px]">
+      <div
+        className="h-[560px] overflow-auto rounded-lg border border-border bg-muted/20"
+        onWheel={(event) => {
+          event.preventDefault();
+          setZoom((current) => clampGraphZoom(current + (event.deltaY < 0 ? graphZoom.step : -graphZoom.step)));
+        }}
+      >
+        <svg
+          viewBox={`0 0 ${graphCanvas.width} ${graphCanvas.height}`}
+          className="block"
+          style={{ width: graphCanvas.width * zoom, height: graphCanvas.height * zoom }}
+        >
           <defs>
             <marker
               id="agent-arrow"
@@ -861,7 +1151,31 @@ function AgentFlowDiagram({
             >
               <path d="M0,0 L8,4 L0,8 Z" fill="currentColor" />
             </marker>
+            <marker
+              id="react-loop-arrow"
+              markerHeight="8"
+              markerWidth="8"
+              orient="auto"
+              refX="7"
+              refY="4"
+            >
+              <path d="M0,0 L8,4 L0,8 Z" fill="currentColor" />
+            </marker>
           </defs>
+
+          <g>
+            <rect
+              x="150"
+              y="42"
+              width="458"
+              height="38"
+              rx="10"
+              className="fill-background/85 stroke-border"
+            />
+            <text x="166" y="66" className="fill-muted-foreground text-[13px] font-medium">
+              ReAct 闭环：Observe 观察 → Reason 推理 → Act 行动 → Memory 反馈
+            </text>
+          </g>
 
           {Object.entries(layerBands()).map(([name, band]) => (
             <g key={name}>
@@ -879,10 +1193,44 @@ function AgentFlowDiagram({
             </g>
           ))}
 
+          {reactLoopEdges.map((edge) => (
+            <g key={edge.id}>
+              <path
+                d={linePath(edge.points)}
+                className="fill-none stroke-sky-500/70"
+                strokeDasharray="8 7"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth="2"
+                markerEnd="url(#react-loop-arrow)"
+              />
+              <rect
+                x={edge.labelPoint.x - 52}
+                y={edge.labelPoint.y - 12}
+                width="104"
+                height="24"
+                rx="6"
+                className="fill-sky-50 stroke-sky-200"
+              />
+              <text
+                x={edge.labelPoint.x}
+                y={edge.labelPoint.y + 4}
+                textAnchor="middle"
+                className="fill-sky-700 text-[11px]"
+              >
+                {edge.label}
+              </text>
+            </g>
+          ))}
+
           {graph.edges.map((edge, index) => {
             const key = edgeKey(edge, index);
             const path = edgePath(edge);
             const label = edgeLabelPoint(edge);
+            const customLabel = graphEdgeBusinessLabels[edgeRouteKey(edge)];
+            const text = customLabel ?? conditionText(edge.condition);
+            const showLabel = Boolean(customLabel || (edge.condition && edge.condition !== "always"));
+            const labelWidth = Math.max(72, text.length * 13 + 22);
             const active = selection?.kind === "edge" && selection.id === key;
             return (
               <g key={key}>
@@ -898,27 +1246,29 @@ function AgentFlowDiagram({
                   strokeWidth="16"
                   onClick={() => onSelect({ kind: "edge", id: key })}
                 />
-                <g
-                  className="cursor-pointer"
-                  onClick={() => onSelect({ kind: "edge", id: key })}
-                >
-                  <rect
-                    x={label.x - 44}
-                    y={label.y - 12}
-                    width="88"
-                    height="24"
-                    rx="6"
-                    className={active ? "fill-primary" : "fill-background stroke-border"}
-                  />
-                  <text
-                    x={label.x}
-                    y={label.y + 4}
-                    textAnchor="middle"
-                    className={active ? "fill-primary-foreground text-[11px]" : "fill-muted-foreground text-[11px]"}
+                {showLabel ? (
+                  <g
+                    className="cursor-pointer"
+                    onClick={() => onSelect({ kind: "edge", id: key })}
                   >
-                    {conditionText(edge.condition)}
-                  </text>
-                </g>
+                    <rect
+                      x={label.x - labelWidth / 2}
+                      y={label.y - 12}
+                      width={labelWidth}
+                      height="24"
+                      rx="6"
+                      className={active ? "fill-primary" : "fill-background stroke-border"}
+                    />
+                    <text
+                      x={label.x}
+                      y={label.y + 4}
+                      textAnchor="middle"
+                      className={active ? "fill-primary-foreground text-[11px]" : "fill-muted-foreground text-[11px]"}
+                    >
+                      {text}
+                    </text>
+                  </g>
+                ) : null}
               </g>
             );
           })}
@@ -966,6 +1316,7 @@ function SvgAgentNode({
       : executed
         ? "stroke-emerald-300"
         : "stroke-border";
+  const displayName = agentDisplayNames[node.id] ?? node.label;
 
   return (
     <g className="cursor-pointer" onClick={onClick}>
@@ -978,14 +1329,21 @@ function SvgAgentNode({
         className={`${fillClass} ${strokeClass}`}
         strokeWidth={active ? 3 : 1.5}
       />
-      <text x={box.x + 12} y={box.y + 22} className="fill-foreground text-[14px] font-semibold">
+      <text
+        x={box.x + box.width / 2}
+        y={box.y + box.height / 2 - 5}
+        textAnchor="middle"
+        className="fill-foreground text-[15px] font-semibold"
+      >
+        {displayName}
+      </text>
+      <text
+        x={box.x + box.width / 2}
+        y={box.y + box.height / 2 + 17}
+        textAnchor="middle"
+        className="fill-muted-foreground text-[12px] font-medium"
+      >
         {node.label}
-      </text>
-      <text x={box.x + 12} y={box.y + 43} className="fill-muted-foreground text-[12px]">
-        {node.type} · {executed ? "已执行" : "未命中"}
-      </text>
-      <text x={box.x + 12} y={box.y + 63} className="fill-muted-foreground text-[11px]">
-        入 {countKeys(node.input_keys)} / 出 {countKeys(node.output_keys)} / {node.average_duration_ms ?? 0}ms
       </text>
     </g>
   );
@@ -1125,9 +1483,178 @@ function RuntimeSummary({ step }: { step: AgentStepLog | null }) {
         <span className="font-medium text-foreground">最近运行摘要</span>
         <span>{step.status} / {step.duration_ms ?? 0}ms</span>
       </div>
-      <p className="break-words">输入：{step.input_summary ?? "无"}</p>
-      <p className="mt-1 break-words">输出：{step.output_summary ?? "无"}</p>
+      <RuntimeSummaryLine label="输入" value={step.input_summary} />
+      <RuntimeSummaryLine label="输出" value={step.output_summary} />
       {step.error_message ? <p className="mt-1 text-red-600">错误：{step.error_message}</p> : null}
+    </div>
+  );
+}
+
+function RuntimeSummaryLine({ label, value }: { label: string; value: string | null }) {
+  const text = value ?? "无";
+  const long = text.length > RUNTIME_SUMMARY_PREVIEW_LENGTH;
+  if (!long) {
+    return (
+      <p className="mt-1 break-words">
+        {label}：{text}
+      </p>
+    );
+  }
+
+  return (
+    <details className="mt-1">
+      <summary className="cursor-pointer text-foreground">
+        <span>{label}：</span>
+        <span className="text-muted-foreground">内容较长，点击展开</span>
+      </summary>
+      <div className="mt-2 max-h-32 overflow-auto rounded-md border border-border bg-background p-2">
+        <p className="break-words">{text}</p>
+      </div>
+    </details>
+  );
+}
+
+function RunObservabilityPanel({
+  runs,
+  detail,
+  loading,
+  onSelectRun,
+}: {
+  runs: AgentRun[];
+  detail: AgentRunDetail | null;
+  loading: boolean;
+  onSelectRun: (runId: string) => void;
+}) {
+  const selectedRunId = detail?.run.run_id ?? null;
+  const slowestStep = detail?.steps.reduce<AgentStepLog | null>((slowest, step) => {
+    if (!slowest) {
+      return step;
+    }
+    return (step.duration_ms ?? 0) > (slowest.duration_ms ?? 0) ? step : slowest;
+  }, null);
+
+  return (
+    <div className="rounded-lg border border-border bg-background">
+      <div className="border-b border-border px-4 py-3">
+        <p className="text-sm font-medium text-foreground">运行观测中心</p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          左侧选择一次真实咨询，右侧直接查看本轮多 Agent 执行链路。
+        </p>
+      </div>
+      <div className="grid gap-0 lg:grid-cols-[0.38fr_0.62fr]">
+        <div className="border-b border-border lg:border-b-0 lg:border-r">
+          <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-2">
+            <p className="text-sm font-medium text-foreground">最近运行</p>
+            <span className="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">{runs.length} 条</span>
+          </div>
+          <div className="max-h-[620px] divide-y divide-border overflow-auto">
+            {runs.map((run) => {
+              const active = run.run_id === selectedRunId;
+              return (
+                <button
+                  key={run.run_id}
+                  type="button"
+                  className={
+                    active
+                      ? "w-full border-l-4 border-primary bg-primary/5 px-4 py-3 text-left"
+                      : "w-full border-l-4 border-transparent px-4 py-3 text-left hover:bg-muted/40"
+                  }
+                  disabled={loading}
+                  onClick={() => onSelectRun(run.run_id)}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <p className="line-clamp-2 text-sm font-medium leading-6 text-foreground">{run.question}</p>
+                    <span className={statusPillClass(run.status)}>{run.status}</span>
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-1.5 text-xs text-muted-foreground">
+                    <span className="rounded-md bg-muted px-2 py-1">{run.intent ?? "unknown"}</span>
+                    <span className="rounded-md bg-muted px-2 py-1">{run.case_type ?? "general"}</span>
+                    <span className="rounded-md bg-muted px-2 py-1">{run.risk_level ?? "未评估"}</span>
+                    <span className="rounded-md bg-muted px-2 py-1">{run.duration_ms ?? 0}ms</span>
+                  </div>
+                  <p className="mt-2 text-xs text-muted-foreground">{formatDateTime(run.started_at)}</p>
+                </button>
+              );
+            })}
+            {runs.length === 0 ? (
+              <p className="px-4 py-8 text-sm text-muted-foreground">暂无 Agent 运行记录</p>
+            ) : null}
+          </div>
+        </div>
+
+        <div>
+          <div className="border-b border-border px-4 py-3">
+            <p className="text-sm font-medium text-foreground">运行详情</p>
+            {detail ? (
+              <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">{detail.run.question}</p>
+            ) : (
+              <p className="mt-1 text-xs text-muted-foreground">请选择左侧运行记录。</p>
+            )}
+          </div>
+          {detail ? (
+            <div className="space-y-4 p-4">
+              <div className="grid gap-2 md:grid-cols-3">
+                <MetricMini label="意图" value={detail.run.intent ?? "unknown"} />
+                <MetricMini label="事项" value={detail.run.case_type ?? "general"} />
+                <MetricMini label="风险" value={detail.run.risk_level ?? "未评估"} />
+                <MetricMini label="总耗时" value={`${detail.run.duration_ms ?? 0}ms`} />
+                <MetricMini label="执行节点" value={`${detail.steps.length}`} />
+                <MetricMini
+                  label="最慢节点"
+                  value={slowestStep ? `${slowestStep.node_name} ${slowestStep.duration_ms ?? 0}ms` : "无"}
+                />
+              </div>
+
+              <div className="max-h-[520px] space-y-3 overflow-auto pr-1">
+                {detail.steps.map((step, index) => (
+                  <div key={step.id} className="relative pl-7">
+                    <div className="absolute left-2 top-2 h-full w-px bg-border" />
+                    <div className={step.status === "failed" ? "absolute left-0 top-2 size-4 rounded-full border border-red-300 bg-red-50" : "absolute left-0 top-2 size-4 rounded-full border border-emerald-300 bg-emerald-50"} />
+                    <div className="rounded-lg border border-border bg-muted/20 p-3">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <span className="rounded-md bg-background px-2 py-1 text-xs text-muted-foreground">
+                            {String(index + 1).padStart(2, "0")}
+                          </span>
+                          <p className="truncate text-sm font-medium text-foreground">{step.node_name}</p>
+                        </div>
+                        <div className="flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
+                          <span className={statusPillClass(step.status)}>{step.status}</span>
+                          <span>{step.duration_ms ?? 0}ms</span>
+                        </div>
+                      </div>
+                      <p className="mt-2 line-clamp-2 text-xs leading-5 text-muted-foreground">
+                        {compactStepSummary(step)}
+                      </p>
+                      <details className="mt-2 text-xs leading-5 text-muted-foreground">
+                        <summary className="cursor-pointer text-foreground">查看输入/输出摘要</summary>
+                        <div className="mt-2 grid gap-2 md:grid-cols-2">
+                          <div className="max-h-36 overflow-auto rounded-md border border-border bg-background p-2">
+                            <p className="mb-1 font-medium text-foreground">输入</p>
+                            <p className="break-words">{step.input_summary ?? "无"}</p>
+                          </div>
+                          <div className="max-h-36 overflow-auto rounded-md border border-border bg-background p-2">
+                            <p className="mb-1 font-medium text-foreground">输出</p>
+                            <p className="break-words">{step.output_summary ?? "无"}</p>
+                          </div>
+                        </div>
+                        {step.error_message ? <p className="mt-2 text-red-600">错误：{step.error_message}</p> : null}
+                      </details>
+                    </div>
+                  </div>
+                ))}
+                {detail.steps.length === 0 ? (
+                  <p className="rounded-lg border border-dashed border-border p-6 text-sm text-muted-foreground">
+                    暂无执行步骤
+                  </p>
+                ) : null}
+              </div>
+            </div>
+          ) : (
+            <p className="p-6 text-sm text-muted-foreground">暂无运行详情</p>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -1178,15 +1705,21 @@ function AgentGovernanceTable({ nodes }: { nodes: AgentGraphNode[] }) {
 function DocumentRow({
   document,
   loading,
+  isEditing,
+  onToggleEdit,
   onRetry,
   onSave,
   onDisable,
+  onEnable,
 }: {
   document: PolicyDocument;
   loading: boolean;
+  isEditing: boolean;
+  onToggleEdit: () => void;
   onRetry: () => void;
   onSave: (formData: FormData) => void;
   onDisable: () => void;
+  onEnable: () => void;
 }) {
   return (
     <>
@@ -1219,6 +1752,10 @@ function DocumentRow({
         <td className="px-3 py-3 text-sm text-foreground">{document.is_active ? "启用" : "已禁用"}</td>
         <td className="px-3 py-3">
           <div className="flex flex-wrap gap-2">
+            <Button type="button" variant={isEditing ? "secondary" : "outline"} size="sm" disabled={loading} onClick={onToggleEdit}>
+              <Pencil className="size-3.5" />
+              {isEditing ? "收起" : "编辑"}
+            </Button>
             <Button type="button" variant="outline" size="sm" disabled={loading} onClick={onRetry}>
               <RotateCcw className="size-3.5" />
               解析
@@ -1228,16 +1765,30 @@ function DocumentRow({
                 <Trash2 className="size-3.5" />
                 禁用
               </Button>
-            ) : null}
+            ) : (
+              <Button type="button" variant="outline" size="sm" disabled={loading} onClick={onEnable}>
+                <RefreshCw className="size-3.5" />
+                启用
+              </Button>
+            )}
           </div>
         </td>
       </tr>
-      <tr className="border-t border-border bg-muted/20">
-        <td colSpan={6} className="px-3 py-3">
-          <details>
-            <summary className="cursor-pointer text-sm font-medium text-foreground">编辑 metadata</summary>
+      {isEditing ? (
+        <tr className="border-t border-border bg-muted/20">
+          <td colSpan={6} className="px-3 py-3">
+            <div className="rounded-lg border-l-4 border-primary bg-background p-3 shadow-sm">
+              <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-foreground">正在编辑：{document.title}</p>
+                  <p className="mt-1 truncate text-xs text-muted-foreground">{document.file_name}</p>
+                </div>
+                <Button type="button" variant="ghost" size="sm" disabled={loading} onClick={onToggleEdit}>
+                  收起
+                </Button>
+              </div>
             <form
-              className="mt-3 grid gap-3 md:grid-cols-4"
+              className="grid gap-3 md:grid-cols-4"
               onSubmit={(event) => {
                 event.preventDefault();
                 onSave(new FormData(event.currentTarget));
@@ -1264,9 +1815,10 @@ function DocumentRow({
                 </Button>
               </div>
             </form>
-          </details>
-        </td>
-      </tr>
+            </div>
+          </td>
+        </tr>
+      ) : null}
     </>
   );
 }
@@ -1279,6 +1831,127 @@ function Metric({ icon, label, value }: { icon: ReactNode; label: string; value:
         <span>{label}</span>
       </div>
       <p className="text-2xl font-semibold text-foreground">{value}</p>
+    </div>
+  );
+}
+
+function ResizableAgentSplit({ left, right }: { left: ReactNode; right: ReactNode }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [containerWidth, setContainerWidth] = useState(0);
+  const [ratio, setRatio] = useState(() => {
+    if (typeof window === "undefined") {
+      return AGENT_SPLIT_DEFAULT_RATIO;
+    }
+    const saved = Number(window.localStorage.getItem(AGENT_SPLIT_STORAGE_KEY));
+    return clampAgentSplit(Number.isFinite(saved) ? saved : AGENT_SPLIT_DEFAULT_RATIO);
+  });
+  const ratioRef = useRef(ratio);
+  const [dragging, setDragging] = useState(false);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) {
+      return;
+    }
+
+    function syncWidth(width: number) {
+      setContainerWidth(width);
+      setRatio((current) => {
+        const nextRatio = clampAgentSplit(current, width);
+        ratioRef.current = nextRatio;
+        return nextRatio;
+      });
+    }
+
+    syncWidth(container.getBoundingClientRect().width);
+    const observer = new ResizeObserver((entries) => {
+      const width = entries[0]?.contentRect.width;
+      if (width) {
+        syncWidth(width);
+      }
+    });
+    observer.observe(container);
+
+    return () => observer.disconnect();
+  }, []);
+
+  function updateRatio(clientX: number) {
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (!rect || rect.width <= 0) {
+      return;
+    }
+    const nextRatio = clampAgentSplit((clientX - rect.left) / rect.width, rect.width);
+    ratioRef.current = nextRatio;
+    setRatio(nextRatio);
+  }
+
+  function persistRatio(value: number) {
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(AGENT_SPLIT_STORAGE_KEY, String(value));
+    }
+  }
+
+  function handleMouseDown(event: ReactMouseEvent<HTMLButtonElement>) {
+    event.preventDefault();
+    setDragging(true);
+    updateRatio(event.clientX);
+
+    function handleMouseMove(mouseEvent: MouseEvent) {
+      mouseEvent.preventDefault();
+      updateRatio(mouseEvent.clientX);
+    }
+
+    function handleMouseUp() {
+      setDragging(false);
+      persistRatio(ratioRef.current);
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    }
+
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+  }
+
+  function resetRatio() {
+    ratioRef.current = AGENT_SPLIT_DEFAULT_RATIO;
+    setRatio(AGENT_SPLIT_DEFAULT_RATIO);
+    persistRatio(AGENT_SPLIT_DEFAULT_RATIO);
+  }
+
+  const layoutRatio = clampAgentSplit(ratio, containerWidth);
+  const leftPercent = layoutRatio * 100;
+  const rightPercent = 100 - leftPercent;
+
+  return (
+    <div
+      ref={containerRef}
+      className={dragging ? "grid select-none gap-0" : "grid gap-0"}
+      style={{
+        gridTemplateColumns: `minmax(${AGENT_SPLIT_GRAPH_MIN_WIDTH}px, calc(${leftPercent}% - ${
+          AGENT_SPLIT_HANDLE_WIDTH / 2
+        }px)) ${AGENT_SPLIT_HANDLE_WIDTH}px minmax(${AGENT_SPLIT_DETAIL_MIN_WIDTH}px, calc(${rightPercent}% - ${
+          AGENT_SPLIT_HANDLE_WIDTH / 2
+        }px))`,
+      }}
+    >
+      <div className="min-w-0 pr-2">{left}</div>
+      <button
+        type="button"
+        aria-label="拖动调整编排图和详情宽度，双击恢复默认"
+        title="拖动调整宽度，双击恢复默认"
+        className="group flex cursor-col-resize items-stretch justify-center rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        onDoubleClick={resetRatio}
+        onMouseDown={handleMouseDown}
+      >
+        <span
+          className={
+            dragging
+              ? "my-2 w-1 rounded-full bg-primary"
+              : "my-2 w-px rounded-full bg-border transition-colors group-hover:bg-primary"
+          }
+        />
+      </button>
+      <div className="min-w-0 pl-2">{right}</div>
     </div>
   );
 }
@@ -1374,10 +2047,6 @@ function keyArray(value: string[] | Record<string, unknown> | null) {
   return Array.isArray(value) ? value : Object.keys(value);
 }
 
-function countKeys(value: string[] | Record<string, unknown> | null) {
-  return keyArray(value).length;
-}
-
 function edgeKey(edge: AgentGraphEdge, index: number) {
   return `${edge.source}-${edge.target}-${edge.condition ?? "always"}-${index}`;
 }
@@ -1400,45 +2069,136 @@ function conditionExplanation(condition: string | null) {
 
 function layerBands() {
   return {
-    入口: { x: 18, y: 282, width: 292, height: 118 },
-    理解: { x: 308, y: 282, width: 540, height: 118 },
-    知识: { x: 848, y: 282, width: 360, height: 118 },
-    分支: { x: 1208, y: 128, width: 178, height: 412 },
-    治理生成: { x: 1388, y: 282, width: 178, height: 470 },
+    主链路: { x: 38, y: 190, width: 1050, height: 160 },
+    证据中枢: { x: 1090, y: 190, width: 188, height: 160 },
+    缺口追问: { x: 1090, y: 48, width: 188, height: 150 },
+    判断行动治理: { x: 724, y: 402, width: 554, height: 166 },
+    生成与记忆: { x: 178, y: 402, width: 534, height: 166 },
   };
 }
 
 function edgePath(edge: AgentGraphEdge) {
-  const source = graphNodePositions[edge.source];
-  const target = graphNodePositions[edge.target];
-  if (!source || !target) {
+  const route = graphEdgeRoutes[edgeRouteKey(edge)];
+  if (route) {
+    return linePath(route);
+  }
+  const points = edgeAnchorPoints(edge);
+  if (!points) {
     return "";
   }
-  const sx = source.x + source.width;
-  const sy = source.y + source.height / 2;
-  const tx = target.x;
-  const ty = target.y + target.height / 2;
+  const { sx, sy, tx, ty, vertical, forward } = points;
+  if (vertical) {
+    const midY = sy + (ty - sy) / 2;
+    return `M ${sx} ${sy} C ${sx} ${midY}, ${tx} ${midY}, ${tx} ${ty}`;
+  }
   if (Math.abs(sy - ty) < 4) {
     return `M ${sx} ${sy} L ${tx} ${ty}`;
   }
-  const midX = sx + Math.max(40, (tx - sx) / 2);
+  const midX = forward
+    ? sx + Math.max(44, Math.abs(tx - sx) / 2)
+    : sx - Math.max(44, Math.abs(tx - sx) / 2);
   return `M ${sx} ${sy} C ${midX} ${sy}, ${midX} ${ty}, ${tx} ${ty}`;
 }
 
+function linePath(points: [number, number][]) {
+  return points.map(([x, y], index) => `${index === 0 ? "M" : "L"} ${x} ${y}`).join(" ");
+}
+
 function edgeLabelPoint(edge: AgentGraphEdge) {
+  const override = graphEdgeLabelPoints[edgeRouteKey(edge)];
+  if (override) {
+    return override;
+  }
+  const points = edgeAnchorPoints(edge);
+  if (!points) {
+    return { x: 0, y: 0 };
+  }
+  const { sx, sy, tx, ty } = points;
+  return {
+    x: sx + (tx - sx) * 0.5,
+    y: sy + (ty - sy) * 0.5 - 18,
+  };
+}
+
+function edgeAnchorPoints(edge: AgentGraphEdge) {
   const source = graphNodePositions[edge.source];
   const target = graphNodePositions[edge.target];
   if (!source || !target) {
-    return { x: 0, y: 0 };
+    return null;
   }
-  const sx = source.x + source.width;
-  const sy = source.y + source.height / 2;
-  const tx = target.x;
-  const ty = target.y + target.height / 2;
+  const sourceCenterX = source.x + source.width / 2;
+  const sourceCenterY = source.y + source.height / 2;
+  const targetCenterX = target.x + target.width / 2;
+  const targetCenterY = target.y + target.height / 2;
+  if (Math.abs(source.x - target.x) < 8) {
+    const targetBelow = targetCenterY > sourceCenterY;
+    return {
+      sx: sourceCenterX,
+      sy: targetBelow ? source.y + source.height : source.y,
+      tx: targetCenterX,
+      ty: targetBelow ? target.y : target.y + target.height,
+      vertical: true,
+      forward: true,
+    };
+  }
+  const forward = target.x > source.x;
   return {
-    x: sx + (tx - sx) * 0.55,
-    y: sy + (ty - sy) * 0.55 - 10,
+    sx: forward ? source.x + source.width : source.x,
+    sy: sourceCenterY,
+    tx: forward ? target.x : target.x + target.width,
+    ty: targetCenterY,
+    vertical: false,
+    forward,
   };
+}
+
+function edgeRouteKey(edge: AgentGraphEdge) {
+  return `${edge.source}->${edge.target}`;
+}
+
+function clampGraphZoom(value: number) {
+  return Math.min(graphZoom.max, Math.max(graphZoom.min, Number(value.toFixed(2))));
+}
+
+function clampAgentSplit(value: number, containerWidth = 0) {
+  let minRatio = AGENT_SPLIT_MIN_RATIO;
+  let maxRatio = AGENT_SPLIT_MAX_RATIO;
+
+  if (containerWidth > AGENT_SPLIT_HANDLE_WIDTH + AGENT_SPLIT_GRAPH_MIN_WIDTH + AGENT_SPLIT_DETAIL_MIN_WIDTH) {
+    minRatio = Math.max(
+      minRatio,
+      (AGENT_SPLIT_GRAPH_MIN_WIDTH + AGENT_SPLIT_HANDLE_WIDTH / 2) / containerWidth,
+    );
+    maxRatio = Math.min(
+      maxRatio,
+      1 - (AGENT_SPLIT_DETAIL_MIN_WIDTH + AGENT_SPLIT_HANDLE_WIDTH / 2) / containerWidth,
+    );
+  }
+
+  if (minRatio > maxRatio) {
+    return Number(((minRatio + maxRatio) / 2).toFixed(3));
+  }
+
+  return Math.min(maxRatio, Math.max(minRatio, Number(value.toFixed(3))));
+}
+
+function statusPillClass(status: string) {
+  if (status === "success") {
+    return "rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs text-emerald-700";
+  }
+  if (status === "failed") {
+    return "rounded-md border border-red-200 bg-red-50 px-2 py-1 text-xs text-red-700";
+  }
+  return "rounded-md border border-border bg-muted px-2 py-1 text-xs text-muted-foreground";
+}
+
+function compactStepSummary(step: AgentStepLog) {
+  const source = step.output_summary ?? step.error_message ?? step.input_summary ?? "无摘要";
+  return truncateText(source, 150);
+}
+
+function truncateText(value: string, maxLength: number) {
+  return value.length > maxLength ? `${value.slice(0, maxLength)}...` : value;
 }
 
 function formatDateTime(value: string) {
