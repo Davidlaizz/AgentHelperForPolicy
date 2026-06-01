@@ -160,6 +160,125 @@ export function searchRAG(
 }
 
 // ---------------------------------------------------------------------------
+// Management Dashboard
+// ---------------------------------------------------------------------------
+export interface CategoryCount {
+  name: string;
+  count: number;
+}
+
+export interface DashboardResponse {
+  document_count: number;
+  active_document_count: number;
+  parsed_document_count: number;
+  chunk_count: number;
+  today_question_count: number;
+  hot_question_count: number;
+  standard_answer_count: number;
+  high_risk_answer_count: number;
+  service_case_count: number;
+  memory_item_count: number;
+  top_policy_categories: CategoryCount[];
+  top_case_types: string[];
+}
+
+export function getDashboard(): Promise<DashboardResponse> {
+  return request<DashboardResponse>("/management/dashboard");
+}
+
+// ---------------------------------------------------------------------------
+// Hot Questions
+// ---------------------------------------------------------------------------
+export interface HotQuestionItem {
+  id: string;
+  question_text: string;
+  normalized_question: string;
+  policy_category: string | null;
+  hit_count: number;
+  last_asked_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export function getHotQuestions(limit?: number): Promise<HotQuestionItem[]> {
+  const params = limit ? `?limit=${limit}` : "";
+  return request<HotQuestionItem[]>(`/management/hot-questions${params}`);
+}
+
+// ---------------------------------------------------------------------------
+// Standard Answers
+// ---------------------------------------------------------------------------
+export interface StandardAnswerItem {
+  id: string;
+  title: string;
+  policy_category: string | null;
+  question_keywords: string | null;
+  applicable_scope: string | null;
+  answer_content: string | null;
+  status: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export function getStandardAnswers(): Promise<StandardAnswerItem[]> {
+  return request<StandardAnswerItem[]>("/management/standard-answers");
+}
+
+// ---------------------------------------------------------------------------
+// System Config
+// ---------------------------------------------------------------------------
+export interface ModelPreset {
+  id: string;
+  label: string;
+  provider: string;
+  model: string;
+  api_url: string | null;
+  description: string;
+  keep_current_api_key: boolean;
+}
+
+export interface ModelServiceConfig {
+  provider: string;
+  model: string;
+  api_url: string | null;
+  api_key_status: string;
+  api_key_masked: string | null;
+  max_tokens: number | null;
+  timeout_seconds: number;
+  thinking_type: string | null;
+  compatible_protocol: string;
+  editable_fields: string[];
+  available_presets: ModelPreset[];
+}
+
+export interface SystemConfigResponse {
+  model_service: ModelServiceConfig;
+  rag_service: Record<string, unknown>;
+  agent_governance: Record<string, unknown>;
+  edit_mode: string;
+  edit_note: string;
+  updated_at: string;
+}
+
+export function getSystemConfig(): Promise<SystemConfigResponse> {
+  return request<SystemConfigResponse>("/management/system-config");
+}
+
+// ---------------------------------------------------------------------------
+// Agent Graph
+// ---------------------------------------------------------------------------
+export interface AgentGraphResponse {
+  version: string;
+  description: string;
+  nodes: Array<{ id: string; label: string; type: string; description: string }>;
+  edges: Array<{ source: string; target: string; condition: string }>;
+}
+
+export function getAgentGraph(): Promise<AgentGraphResponse> {
+  return request<AgentGraphResponse>("/management/agent-graph");
+}
+
+// ---------------------------------------------------------------------------
 // Health
 // ---------------------------------------------------------------------------
 export interface HealthStatus {
