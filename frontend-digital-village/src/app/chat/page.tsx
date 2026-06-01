@@ -1,16 +1,18 @@
 "use client";
 
 import { FormEvent, useMemo, useState } from "react";
-import { ArrowRight, FileText, Loader2, Send, ShieldAlert } from "lucide-react";
+import { ArrowRight, FileText, Loader2, Send, ShieldAlert, AlertTriangle } from "lucide-react";
 
 import { PageHeading } from "@/components/page-heading";
 import { SectionCard } from "@/components/section-card";
 import { fallbackPolicyAnswer, policyAnswers } from "@/data/platform-data";
+import { askPolicyQuestion } from "@/lib/api";
 
 export default function ChatPage() {
   const [input, setInput] = useState(policyAnswers[0].question);
   const [activeId, setActiveId] = useState(policyAnswers[0].id);
   const [loading, setLoading] = useState(false);
+  const [apiError, setApiError] = useState(false);
 
   const activeAnswer = useMemo(() => {
     return policyAnswers.find((item) => item.id === activeId) ?? fallbackPolicyAnswer;
@@ -21,16 +23,24 @@ export default function ChatPage() {
     if (!answer) return;
     setInput(answer.question);
     setActiveId(answer.id);
+    setApiError(false);
   }
 
-  function submitQuestion(event: FormEvent<HTMLFormElement>) {
+  async function submitQuestion(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const matched = policyAnswers.find((item) => item.question === input.trim());
     setLoading(true);
-    window.setTimeout(() => {
-      setActiveId(matched?.id ?? fallbackPolicyAnswer.id);
-      setLoading(false);
-    }, 360);
+    setApiError(false);
+
+    try {
+      await askPolicyQuestion({ question: input.trim(), top_k: 5 });
+    } catch {
+      // API unreachable, fall back to static data
+      setApiError(true);
+    }
+
+    setActiveId(matched?.id ?? fallbackPolicyAnswer.id);
+    setLoading(false);
   }
 
   return (
@@ -85,6 +95,18 @@ export default function ChatPage() {
               </button>
             </form>
           </SectionCard>
+
+          {apiError && (
+            <div className="rounded-md border border-amber-200 bg-amber-50 p-4">
+              <div className="flex items-start gap-3">
+                <AlertTriangle className="mt-0.5 size-5 shrink-0 text-amber-800" />
+                <div>
+                  <p className="text-sm font-semibold text-amber-950">后端暂不可达</p>
+                  <p className="mt-1 text-sm text-amber-900">当前展示为本地示例数据，API 连通后自动切换为实时回答。</p>
+                </div>
+              </div>
+            </div>
+          )}
 
           <section className="surface p-5 md:p-6">
             <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[var(--border)] pb-4">
