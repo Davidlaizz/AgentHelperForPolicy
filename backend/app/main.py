@@ -10,6 +10,7 @@ from app.api.routes.management import router as management_router
 from app.api.routes.rag import router as rag_router
 from app.core.config import settings
 from app.db.init_db import init_db
+from app.digital_village.api.routes.chat import router as dv_chat_router
 from app.digital_village.api.routes.documents import router as dv_documents_router
 from app.digital_village.api.routes.health import router as dv_health_router
 from app.digital_village.api.routes.rag import router as dv_rag_router
@@ -51,6 +52,7 @@ app.include_router(management_router, prefix="/api")
 # 数字乡村场景路由
 app.include_router(dv_health_router, prefix="/api/digital-village")
 app.include_router(dv_documents_router, prefix="/api/digital-village")
+app.include_router(dv_chat_router, prefix="/api/digital-village")
 app.include_router(dv_rag_router, prefix="/api/digital-village")
 
 
