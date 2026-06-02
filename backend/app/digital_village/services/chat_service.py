@@ -235,7 +235,9 @@ def _dv_http_generate(prompt: str) -> str:
         raise RuntimeError(f"LLM service failed: {exc.reason}") from exc
 
     if "choices" in body:
-        return body["choices"][0]["message"]["content"]
+        msg = body["choices"][0]["message"]
+        # OpenAI-compatible: content field; senseNova: reasoning field
+        return str(msg.get("content") or msg.get("reasoning") or "")
     if "output" in body:
         return str(body["output"])
     raise RuntimeError("LLM response missing 'choices' or 'output' field")
