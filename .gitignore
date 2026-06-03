@@ -1,21 +1,51 @@
+# ──  Frontend ──────────────────────────────────────
 frontend/.next/
 frontend/node_modules/
 frontend/.env.local
+
+frontend-digital-village/.next/
+frontend-digital-village/node_modules/
+frontend-digital-village/.env.local
+
+# ──  Backend ───────────────────────────────────────
 backend/.venv/
-backend/**/__pycache__/
+backend/.env
 backend/.pytest_cache/
 backend/.mypy_cache/
-backend/**/*.pyc
-backend/**/*.pyo
-backend/.env
+backend/**/__pycache__/
 backend/wheels/
+
+# Storage uploads / parsed (keep .gitkeep)
 backend/storage/uploads/*
 backend/storage/parsed/*
 !backend/storage/uploads/.gitkeep
 !backend/storage/parsed/.gitkeep
+backend/storage/digital-village/uploads/*
+backend/storage/digital-village/parsed/*
+!backend/storage/digital-village/uploads/.gitkeep
+!backend/storage/digital-village/parsed/.gitkeep
+
+# ──  Scripts & Tools ───────────────────────────────
 scripts/logs/
-.codex-logs/
 scripts/ssh-tools/node_modules/
+
+# ──  Agent / IDE artifacts ─────────────────────────
+.codex-logs/
+.playwright-cli/
+.playwright-mcp/
+.agents/
+.claude/
+.mcp.json
+skills-lock.json
+
+# ──  OS & Build ────────────────────────────────────
+.DS_Store
+*.tsbuildinfo
 *.pyc
 *.pyo
-.DS_Store
+~$*.docx
+
+# ──  Test / temp files ─────────────────────────────
+baidu-search-test.png
+admin-settings.png
+nul
