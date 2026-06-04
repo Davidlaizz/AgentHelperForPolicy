@@ -5,8 +5,11 @@ import { AppNav } from "@/components/app-nav";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "智策通 V1.0",
+  title: "智策通",
   description: "高校政策智能服务工作台",
+  icons: {
+    icon: "/zhicetong-mark.svg",
+  },
 };
 
 export default function RootLayout({

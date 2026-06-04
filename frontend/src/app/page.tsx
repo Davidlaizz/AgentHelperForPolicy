@@ -1,4 +1,5 @@
 import Link from "next/link";
+import Image from "next/image";
 import {
   ArrowRight,
   BadgeCheck,
@@ -111,9 +112,19 @@ export default function Home() {
     <div className="mx-auto flex w-full max-w-7xl flex-1 flex-col gap-6 px-4 py-6 md:px-6">
       <section className="grid gap-6 lg:grid-cols-[1.45fr_0.85fr]">
         <div className="rounded-lg border border-border bg-card p-6">
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <GraduationCap className="size-4" />
-            西安电子科技大学高校政策服务样板
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <Image
+              src="/zhicetong-logo.svg"
+              alt="智策通 Logo"
+              width={224}
+              height={56}
+              className="h-14 w-auto max-w-full"
+              priority
+            />
+            <div className="flex items-center gap-2 rounded-md bg-muted px-3 py-2 text-sm text-muted-foreground">
+              <GraduationCap className="size-4" />
+              西安电子科技大学高校政策服务样板
+            </div>
           </div>
           <div className="mt-4 max-w-3xl space-y-3">
             <h1 className="text-3xl font-semibold leading-tight text-card-foreground md:text-4xl">

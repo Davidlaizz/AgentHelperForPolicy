@@ -1,0 +1,25 @@
+<svg width="720" height="180" viewBox="0 0 720 180" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">智策通项目 Logo</title>
+  <desc id="desc">由实验室蓝白安全标识衍生而来的智策通项目横版 Logo</desc>
+  <rect width="720" height="180" rx="24" fill="white"/>
+  <rect x="24" y="24" width="132" height="132" rx="24" fill="#0A6EAE"/>
+  <path d="M40 84H94C98.4 84 102 87.6 102 92C102 96.4 98.4 100 94 100H40V84Z" fill="white"/>
+  <path d="M43 100H70V112H61V106H53V112H43V100Z" fill="white"/>
+  <circle cx="56" cy="92" r="16" stroke="white" stroke-width="10"/>
+  <path d="M98 42H124L142 68V112L124 138H98L82 112V68L98 42Z" fill="white"/>
+  <path d="M111 58C117.6 58 123 52.6 123 46H99C99 52.6 104.4 58 111 58Z" fill="#0A6EAE"/>
+  <path d="M111 122C104.4 122 99 127.4 99 134H123C123 127.4 117.6 122 111 122Z" fill="#0A6EAE"/>
+  <path d="M85 76C91.6 76 97 81.4 97 88C97 94.6 91.6 100 85 100V76Z" fill="#0A6EAE"/>
+  <path d="M139 76C132.4 76 127 81.4 127 88C127 94.6 132.4 100 139 100V76Z" fill="#0A6EAE"/>
+  <rect x="110.8" y="66" width="15" height="15" transform="rotate(45 110.8 66)" fill="#0A6EAE"/>
+  <rect x="95.8" y="81" width="15" height="15" transform="rotate(45 95.8 81)" fill="#0A6EAE"/>
+  <rect x="110.8" y="81" width="15" height="15" transform="rotate(45 110.8 81)" fill="#0A6EAE"/>
+  <rect x="125.8" y="81" width="15" height="15" transform="rotate(45 125.8 81)" fill="#0A6EAE"/>
+  <rect x="110.8" y="96" width="15" height="15" transform="rotate(45 110.8 96)" fill="#0A6EAE"/>
+  <text x="184" y="88" fill="#0F2343" font-family="Microsoft YaHei, PingFang SC, Segoe UI, Arial, sans-serif" font-size="48" font-weight="700" letter-spacing="0">智策通</text>
+  <text x="187" y="124" fill="#0A6EAE" font-family="Segoe UI, Arial, sans-serif" font-size="22" font-weight="600" letter-spacing="1.5">Agentic Policy Service</text>
+  <path d="M184 140H612" stroke="#D6E7F5" stroke-width="2"/>
+  <circle cx="636" cy="140" r="6" fill="#0A6EAE"/>
+  <circle cx="660" cy="140" r="6" fill="#12A594"/>
+  <circle cx="684" cy="140" r="6" fill="#0A6EAE"/>
+</svg>

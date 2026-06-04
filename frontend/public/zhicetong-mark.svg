@@ -1,0 +1,18 @@
+<svg width="160" height="160" viewBox="0 0 160 160" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">智策通项目图标</title>
+  <desc id="desc">蓝底白色钥匙与政策节点融合的智策通项目标识</desc>
+  <rect width="160" height="160" rx="28" fill="#0A6EAE"/>
+  <path d="M19 73H88C92.8 73 96.6 76.8 96.6 81.5C96.6 86.2 92.8 90 88 90H19V73Z" fill="white"/>
+  <path d="M24 90H55V103H45V96H36V103H24V90Z" fill="white"/>
+  <circle cx="38" cy="81.5" r="18.5" stroke="white" stroke-width="12"/>
+  <path d="M92 20H124L146 52V108L124 140H92L74 108V52L92 20Z" fill="white"/>
+  <path d="M110 40C119.4 40 127 32.4 127 23H93C93 32.4 100.6 40 110 40Z" fill="#0A6EAE"/>
+  <path d="M110 120C100.6 120 93 127.6 93 137H127C127 127.6 119.4 120 110 120Z" fill="#0A6EAE"/>
+  <path d="M77 62C86.4 62 94 69.6 94 79C94 88.4 86.4 96 77 96V62Z" fill="#0A6EAE"/>
+  <path d="M143 62C133.6 62 126 69.6 126 79C126 88.4 133.6 96 143 96V62Z" fill="#0A6EAE"/>
+  <rect x="109.9" y="51" width="20" height="20" transform="rotate(45 109.9 51)" fill="#0A6EAE"/>
+  <rect x="89.9" y="71" width="20" height="20" transform="rotate(45 89.9 71)" fill="#0A6EAE"/>
+  <rect x="109.9" y="71" width="20" height="20" transform="rotate(45 109.9 71)" fill="#0A6EAE"/>
+  <rect x="129.9" y="71" width="20" height="20" transform="rotate(45 129.9 71)" fill="#0A6EAE"/>
+  <rect x="109.9" y="91" width="20" height="20" transform="rotate(45 109.9 91)" fill="#0A6EAE"/>
+</svg>

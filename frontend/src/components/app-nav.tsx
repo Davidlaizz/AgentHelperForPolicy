@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { BellRing, FolderKanban, LayoutDashboard, Library, SearchCheck, ShieldCheck } from "lucide-react";
@@ -19,17 +20,22 @@ export function AppNav() {
   return (
     <header className="sticky top-0 z-20 border-b border-border bg-background/95 backdrop-blur">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-3 px-4 py-3 md:flex-row md:items-center md:justify-between md:px-6">
-        <div className="flex min-w-0 items-center gap-4">
-          <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-            智
-          </div>
+        <Link href="/" className="flex min-w-0 items-center gap-4">
+          <Image
+            src="/zhicetong-mark.svg"
+            alt="智策通 Logo"
+            width={40}
+            height={40}
+            className="size-10 shrink-0 rounded-lg"
+            priority
+          />
           <div className="min-w-0">
             <p className="text-sm font-semibold text-foreground">智策通</p>
             <p className="truncate text-xs text-muted-foreground">
               高校政策智能服务工作台
             </p>
           </div>
-        </div>
+        </Link>
         <nav className="flex min-w-0 gap-1 overflow-x-auto pb-1 md:items-center md:overflow-visible md:pb-0">
           {navItems.map(({ href, label, icon: Icon }) => (
             <Link
