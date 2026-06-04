@@ -267,15 +267,293 @@ export function getSystemConfig(): Promise<SystemConfigResponse> {
 // ---------------------------------------------------------------------------
 // Agent Graph
 // ---------------------------------------------------------------------------
+export interface AgentGraphNode {
+  id: string;
+  label: string;
+  type: string;
+  description: string | null;
+  input_keys: string[] | Record<string, unknown> | null;
+  output_keys: string[] | Record<string, unknown> | null;
+  enabled: boolean;
+  call_count: number;
+  average_duration_ms: number | null;
+  failure_count: number;
+  last_failure_message: string | null;
+  last_failure_at: string | null;
+}
+
+export interface AgentGraphEdge {
+  source: string;
+  target: string;
+  condition: string | null;
+  condition_expression: string | null;
+}
+
 export interface AgentGraphResponse {
   version: string;
   description: string;
-  nodes: Array<{ id: string; label: string; type: string; description: string }>;
-  edges: Array<{ source: string; target: string; condition: string }>;
+  nodes: AgentGraphNode[];
+  edges: AgentGraphEdge[];
 }
 
 export function getAgentGraph(): Promise<AgentGraphResponse> {
   return request<AgentGraphResponse>("/management/agent-graph");
+}
+
+export function getAgentNodes(): Promise<AgentGraphNode[]> {
+  return request<AgentGraphNode[]>("/management/agent-nodes");
+}
+
+// ---------------------------------------------------------------------------
+// Agent Runs
+// ---------------------------------------------------------------------------
+export interface AgentRunItem {
+  run_id: string;
+  session_id: string | null;
+  question: string;
+  intent: string | null;
+  case_type: string | null;
+  status: string;
+  risk_level: string | null;
+  started_at: string;
+  finished_at: string | null;
+  duration_ms: number | null;
+}
+
+export interface AgentStepLog {
+  id: string;
+  node_key: string;
+  node_name: string;
+  status: string;
+  input_summary: string | null;
+  output_summary: string | null;
+  started_at: string;
+  finished_at: string | null;
+  duration_ms: number | null;
+  error_message: string | null;
+}
+
+export interface AgentRunDetail {
+  run: AgentRunItem;
+  steps: AgentStepLog[];
+}
+
+export function getAgentRuns(limit?: number): Promise<AgentRunItem[]> {
+  const params = limit ? `?limit=${limit}` : "";
+  return request<AgentRunItem[]>(`/management/agent-runs${params}`);
+}
+
+export function getAgentRunDetail(runId: string): Promise<AgentRunDetail> {
+  return request<AgentRunDetail>(`/management/agent-runs/${runId}`);
+}
+
+// ---------------------------------------------------------------------------
+// Documents (CRUD)
+// ---------------------------------------------------------------------------
+export function uploadDocument(formData: FormData): Promise<PolicyDocumentItem> {
+  const url = `${API_BASE}/documents/upload`;
+  return fetch(url, { method: "POST", body: formData }).then(async (res) => {
+    if (!res.ok) throw new Error(`API ${res.status}: ${await res.text()}`);
+    return res.json();
+  });
+}
+
+export function parseDocument(docId: string): Promise<PolicyDocumentItem> {
+  return request<PolicyDocumentItem>(`/documents/${docId}/parse`, { method: "POST" });
+}
+
+export function updateDocument(docId: string, data: Record<string, unknown>): Promise<PolicyDocumentItem> {
+  return request<PolicyDocumentItem>(`/documents/${docId}`, {
+    method: "PATCH",
+    body: JSON.stringify(data),
+  });
+}
+
+export function disableDocument(docId: string): Promise<PolicyDocumentItem> {
+  return request<PolicyDocumentItem>(`/documents/${docId}`, { method: "DELETE" });
+}
+
+// ---------------------------------------------------------------------------
+// Policy Chunks
+// ---------------------------------------------------------------------------
+export interface PolicyChunkItem {
+  chunk_id: string;
+  document_id: string;
+  document_title: string;
+  file_name: string;
+  chunk_index: number;
+  chunk_text: string;
+  section_title: string | null;
+  article_no: string | null;
+  page_no: number | null;
+  policy_level: string | null;
+  policy_category: string | null;
+  applicable_scope: string | null;
+  effective_from: string | null;
+  effective_to: string | null;
+  metadata: Record<string, unknown>;
+}
+
+export interface PolicyChunkListResponse {
+  total: number;
+  limit: number;
+  offset: number;
+  results: PolicyChunkItem[];
+}
+
+export function getPolicyChunks(params?: {
+  document_id?: string;
+  query?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<PolicyChunkListResponse> {
+  const sp = new URLSearchParams();
+  if (params?.document_id) sp.set("document_id", params.document_id);
+  if (params?.query) sp.set("query", params.query);
+  if (params?.limit) sp.set("limit", String(params.limit));
+  if (params?.offset) sp.set("offset", String(params.offset));
+  const qs = sp.toString();
+  return request<PolicyChunkListResponse>(`/management/policy-chunks${qs ? "?" + qs : ""}`);
+}
+
+// ---------------------------------------------------------------------------
+// Standard Answers (CRUD)
+// ---------------------------------------------------------------------------
+export function createStandardAnswer(data: {
+  title: string;
+  policy_category?: string;
+  answer_content: string;
+}): Promise<StandardAnswerItem> {
+  return request<StandardAnswerItem>("/management/standard-answers", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export function updateStandardAnswer(
+  answerId: string,
+  data: Partial<{ title: string; policy_category: string; answer_content: string; status: string }>
+): Promise<StandardAnswerItem> {
+  return request<StandardAnswerItem>(`/management/standard-answers/${answerId}`, {
+    method: "PATCH",
+    body: JSON.stringify(data),
+  });
+}
+
+export function disableStandardAnswer(answerId: string): Promise<StandardAnswerItem> {
+  return request<StandardAnswerItem>(`/management/standard-answers/${answerId}`, {
+    method: "DELETE",
+  });
+}
+
+// ---------------------------------------------------------------------------
+// System Config Update
+// ---------------------------------------------------------------------------
+export function updateModelService(data: {
+  provider?: string;
+  model?: string;
+  api_url?: string;
+  api_key?: string;
+  max_tokens?: number;
+  timeout_seconds?: number;
+  thinking_type?: string;
+  clear_api_key?: boolean;
+}): Promise<SystemConfigResponse> {
+  return request<SystemConfigResponse>("/management/system-config/model-service", {
+    method: "PATCH",
+    body: JSON.stringify(data),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Service Cases
+// ---------------------------------------------------------------------------
+export interface ServiceCaseItem {
+  id: string;
+  title: string;
+  case_type: string;
+  subject: string | null;
+  region: string | null;
+  stage: string | null;
+  description: string | null;
+  materials: unknown;
+  steps: unknown;
+  department: string | null;
+  risk: string | null;
+  tips: unknown;
+  status: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export function getServiceCases(params?: { case_type?: string; status_filter?: string }): Promise<ServiceCaseItem[]> {
+  const sp = new URLSearchParams();
+  if (params?.case_type) sp.set("case_type", params.case_type);
+  if (params?.status_filter) sp.set("status_filter", params.status_filter);
+  const qs = sp.toString();
+  return request<ServiceCaseItem[]>(`/management/service-cases${qs ? "?" + qs : ""}`);
+}
+
+export function createServiceCase(data: {
+  title: string;
+  case_type: string;
+  subject?: string;
+  region?: string;
+  stage?: string;
+  description?: string;
+  materials?: unknown;
+  steps?: unknown;
+  department?: string;
+  risk?: string;
+  tips?: unknown;
+}): Promise<ServiceCaseItem> {
+  return request<ServiceCaseItem>("/management/service-cases", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Agriculture Diagnosis
+// ---------------------------------------------------------------------------
+export interface AgricultureDiagnosisItem {
+  id: string;
+  problem: string;
+  category: string;
+  diagnosis: string | null;
+  solution: string | null;
+  digital_direction: string | null;
+  policy_links: unknown;
+  pain_points: unknown;
+  actors: unknown;
+  steps: unknown;
+  metrics: unknown;
+  risks: unknown;
+  project_value: string | null;
+  status: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export function getAgricultureDiagnoses(params?: { category?: string }): Promise<AgricultureDiagnosisItem[]> {
+  const sp = new URLSearchParams();
+  if (params?.category) sp.set("category", params.category);
+  const qs = sp.toString();
+  return request<AgricultureDiagnosisItem[]>(`/management/agriculture-diagnoses${qs ? "?" + qs : ""}`);
+}
+
+export function createAgricultureDiagnosis(data: {
+  problem: string;
+  category: string;
+  diagnosis?: string;
+  solution?: string;
+  digital_direction?: string;
+  project_value?: string;
+}): Promise<AgricultureDiagnosisItem> {
+  return request<AgricultureDiagnosisItem>("/management/agriculture-diagnoses", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
 }
 
 // ---------------------------------------------------------------------------

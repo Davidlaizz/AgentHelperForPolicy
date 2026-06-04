@@ -9,12 +9,37 @@ from sqlalchemy.orm import Session
 
 from app.digital_village.config import dv_settings
 from app.digital_village.db.dependencies import get_digital_village_db
+from app.digital_village.services.agent_graph_config import (
+    DV_AGENT_EDGE_DEFINITIONS,
+    DV_AGENT_NODE_DEFINITIONS,
+    DV_GRAPH_DESCRIPTION,
+    DV_GRAPH_VERSION,
+)
 from app.models import (
+    AgentRun,
+    AgentStepLog,
     ChatMessage,
     HotQuestion,
     PolicyChunk,
     PolicyDocument,
     StandardAnswer,
+)
+from app.models.digital_village import AgricultureDiagnosis, DVServiceCase
+from app.schemas.agent_graph import (
+    AgentGraphEdgeResponse,
+    AgentGraphNodeResponse,
+    AgentGraphResponse,
+    AgentRunDetailResponse,
+    AgentRunListItem,
+    AgentStepLogResponse,
+)
+from app.schemas.digital_village import (
+    AgricultureDiagnosisCreateRequest,
+    AgricultureDiagnosisResponse,
+    AgricultureDiagnosisUpdateRequest,
+    ServiceCaseCreateRequest,
+    ServiceCaseResponse,
+    ServiceCaseUpdateRequest,
 )
 from app.schemas.management import (
     CategoryCount,
@@ -35,9 +60,6 @@ from app.schemas.management import (
 
 router = APIRouter(tags=["digital-village-management"])
 
-DV_GRAPH_VERSION = "v1.0-dv-simple"
-DV_GRAPH_DESCRIPTION = "Digital Village simplified RAG+LLM chat pipeline"
-
 MODEL_SERVICE_PRESETS = [
     {
         "id": "mock",
@@ -49,6 +71,18 @@ MODEL_SERVICE_PRESETS = [
         "keep_current_api_key": True,
         "max_tokens": None,
         "timeout_seconds": 90,
+        "thinking_type": "disabled",
+    },
+    {
+        "id": "glm-4.6",
+        "label": "Zhipu GLM-4.6",
+        "provider": "http",
+        "model": "glm-4.6",
+        "api_url": "https://open.bigmodel.cn/api/paas/v4/chat/completions",
+        "description": "智谱 GLM-4.6 模型，复用当前 API 地址。",
+        "keep_current_api_key": True,
+        "max_tokens": 1200,
+        "timeout_seconds": 180,
         "thinking_type": "disabled",
     },
 ]
@@ -84,11 +118,11 @@ def dashboard(
         ),
         hot_question_count=_count(db, HotQuestion),
         standard_answer_count=_count(db, StandardAnswer),
-        high_risk_answer_count=0,
-        service_case_count=0,
+        high_risk_answer_count=_count_high_risk_answers(db),
+        service_case_count=_count(db, DVServiceCase, DVServiceCase.status == "active"),
         memory_item_count=0,
         top_policy_categories=_top_categories(db),
-        top_case_types=[],
+        top_case_types=_top_case_types(db),
     )
 
 
@@ -251,26 +285,222 @@ def update_model_service(
 
 
 # ---------------------------------------------------------------------------
-# Agent Graph (simplified)
+# Agent Graph (multi-node)
 # ---------------------------------------------------------------------------
 
-@router.get("/management/agent-graph")
-def agent_graph() -> dict:
-    return {
-        "version": DV_GRAPH_VERSION,
-        "description": DV_GRAPH_DESCRIPTION,
-        "nodes": [
-            {"id": "retrieval", "label": "RetrievalAgent", "type": "retrieval",
-             "description": "Hybrid vector + keyword search on digital-village policy chunks."},
-            {"id": "answer", "label": "AnswerAgent", "type": "generation",
-             "description": "LLM generation with Policy Basis / AI Inference split."},
+@router.get("/management/agent-graph", response_model=AgentGraphResponse)
+def agent_graph(
+    db: Annotated[Session, Depends(get_digital_village_db)],
+) -> AgentGraphResponse:
+    return AgentGraphResponse(
+        version=DV_GRAPH_VERSION,
+        description=DV_GRAPH_DESCRIPTION,
+        nodes=[_dv_agent_node_response(db, item) for item in DV_AGENT_NODE_DEFINITIONS],
+        edges=[
+            AgentGraphEdgeResponse(
+                source=item["source"],
+                target=item["target"],
+                condition=item.get("condition"),
+            )
+            for item in DV_AGENT_EDGE_DEFINITIONS
         ],
-        "edges": [
-            {"source": "start", "target": "retrieval", "condition": "always"},
-            {"source": "retrieval", "target": "answer", "condition": "always"},
-            {"source": "answer", "target": "end", "condition": "always"},
+    )
+
+
+@router.get("/management/agent-nodes", response_model=list[AgentGraphNodeResponse])
+def agent_nodes(
+    db: Annotated[Session, Depends(get_digital_village_db)],
+) -> list[AgentGraphNodeResponse]:
+    return [_dv_agent_node_response(db, item) for item in DV_AGENT_NODE_DEFINITIONS]
+
+
+@router.get("/management/agent-runs", response_model=list[AgentRunListItem])
+def agent_runs(
+    db: Annotated[Session, Depends(get_digital_village_db)],
+    limit: Annotated[int, Query(ge=1, le=50)] = 10,
+) -> list[AgentRunListItem]:
+    rows = db.execute(
+        select(AgentRun)
+        .order_by(AgentRun.started_at.desc())
+        .limit(limit)
+    ).scalars().all()
+    return [_serialize_agent_run(row) for row in rows]
+
+
+@router.get("/management/agent-runs/{run_id}", response_model=AgentRunDetailResponse)
+def agent_run_detail(
+    run_id: str,
+    db: Annotated[Session, Depends(get_digital_village_db)],
+) -> AgentRunDetailResponse:
+    run = db.get(AgentRun, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Agent 运行记录不存在")
+
+    steps = db.execute(
+        select(AgentStepLog)
+        .where(AgentStepLog.run_id == run.id)
+        .order_by(AgentStepLog.started_at.asc())
+    ).scalars().all()
+    return AgentRunDetailResponse(
+        run=_serialize_agent_run(run),
+        steps=[
+            AgentStepLogResponse(
+                id=str(step.id),
+                node_key=step.node_key,
+                node_name=step.node_name,
+                status=step.status,
+                input_summary=step.input_summary,
+                output_summary=step.output_summary,
+                started_at=step.started_at,
+                finished_at=step.finished_at,
+                duration_ms=step.duration_ms,
+                error_message=step.error_message,
+            )
+            for step in steps
         ],
-    }
+    )
+
+
+# ---------------------------------------------------------------------------
+# Service Cases
+# ---------------------------------------------------------------------------
+
+@router.get("/management/service-cases", response_model=list[ServiceCaseResponse])
+def list_service_cases(
+    db: Annotated[Session, Depends(get_digital_village_db)],
+    case_type: str | None = None,
+    status_filter: str | None = None,
+) -> list[ServiceCaseResponse]:
+    stmt = select(DVServiceCase).order_by(DVServiceCase.created_at.desc())
+    if case_type:
+        stmt = stmt.where(DVServiceCase.case_type == case_type)
+    if status_filter:
+        stmt = stmt.where(DVServiceCase.status == status_filter)
+    rows = db.execute(stmt).scalars().all()
+    return [ServiceCaseResponse.model_validate(row) for row in rows]
+
+
+@router.post(
+    "/management/service-cases",
+    response_model=ServiceCaseResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_service_case(
+    payload: ServiceCaseCreateRequest,
+    db: Annotated[Session, Depends(get_digital_village_db)],
+) -> ServiceCaseResponse:
+    case = DVServiceCase(**payload.model_dump())
+    db.add(case)
+    db.commit()
+    db.refresh(case)
+    return ServiceCaseResponse.model_validate(case)
+
+
+@router.patch(
+    "/management/service-cases/{case_id}",
+    response_model=ServiceCaseResponse,
+)
+def update_service_case(
+    case_id: str,
+    payload: ServiceCaseUpdateRequest,
+    db: Annotated[Session, Depends(get_digital_village_db)],
+) -> ServiceCaseResponse:
+    case = db.get(DVServiceCase, case_id)
+    if case is None:
+        raise HTTPException(status_code=404, detail="事项不存在")
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        setattr(case, field, value)
+    db.commit()
+    db.refresh(case)
+    return ServiceCaseResponse.model_validate(case)
+
+
+@router.delete(
+    "/management/service-cases/{case_id}",
+    response_model=ServiceCaseResponse,
+)
+def disable_service_case(
+    case_id: str,
+    db: Annotated[Session, Depends(get_digital_village_db)],
+) -> ServiceCaseResponse:
+    case = db.get(DVServiceCase, case_id)
+    if case is None:
+        raise HTTPException(status_code=404, detail="事项不存在")
+    case.status = "disabled"
+    db.commit()
+    db.refresh(case)
+    return ServiceCaseResponse.model_validate(case)
+
+
+# ---------------------------------------------------------------------------
+# Agriculture Diagnosis
+# ---------------------------------------------------------------------------
+
+@router.get("/management/agriculture-diagnoses", response_model=list[AgricultureDiagnosisResponse])
+def list_agriculture_diagnoses(
+    db: Annotated[Session, Depends(get_digital_village_db)],
+    category: str | None = None,
+    status_filter: str | None = None,
+) -> list[AgricultureDiagnosisResponse]:
+    stmt = select(AgricultureDiagnosis).order_by(AgricultureDiagnosis.created_at.desc())
+    if category:
+        stmt = stmt.where(AgricultureDiagnosis.category == category)
+    if status_filter:
+        stmt = stmt.where(AgricultureDiagnosis.status == status_filter)
+    rows = db.execute(stmt).scalars().all()
+    return [AgricultureDiagnosisResponse.model_validate(row) for row in rows]
+
+
+@router.post(
+    "/management/agriculture-diagnoses",
+    response_model=AgricultureDiagnosisResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_agriculture_diagnosis(
+    payload: AgricultureDiagnosisCreateRequest,
+    db: Annotated[Session, Depends(get_digital_village_db)],
+) -> AgricultureDiagnosisResponse:
+    diagnosis = AgricultureDiagnosis(**payload.model_dump())
+    db.add(diagnosis)
+    db.commit()
+    db.refresh(diagnosis)
+    return AgricultureDiagnosisResponse.model_validate(diagnosis)
+
+
+@router.patch(
+    "/management/agriculture-diagnoses/{diagnosis_id}",
+    response_model=AgricultureDiagnosisResponse,
+)
+def update_agriculture_diagnosis(
+    diagnosis_id: str,
+    payload: AgricultureDiagnosisUpdateRequest,
+    db: Annotated[Session, Depends(get_digital_village_db)],
+) -> AgricultureDiagnosisResponse:
+    diagnosis = db.get(AgricultureDiagnosis, diagnosis_id)
+    if diagnosis is None:
+        raise HTTPException(status_code=404, detail="诊断记录不存在")
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        setattr(diagnosis, field, value)
+    db.commit()
+    db.refresh(diagnosis)
+    return AgricultureDiagnosisResponse.model_validate(diagnosis)
+
+
+@router.delete(
+    "/management/agriculture-diagnoses/{diagnosis_id}",
+    response_model=AgricultureDiagnosisResponse,
+)
+def disable_agriculture_diagnosis(
+    diagnosis_id: str,
+    db: Annotated[Session, Depends(get_digital_village_db)],
+) -> AgricultureDiagnosisResponse:
+    diagnosis = db.get(AgricultureDiagnosis, diagnosis_id)
+    if diagnosis is None:
+        raise HTTPException(status_code=404, detail="诊断记录不存在")
+    diagnosis.status = "disabled"
+    db.commit()
+    db.refresh(diagnosis)
+    return AgricultureDiagnosisResponse.model_validate(diagnosis)
 
 
 # ---------------------------------------------------------------------------
@@ -292,6 +522,31 @@ def _top_categories(db: Session) -> list[CategoryCount]:
         .limit(5)
     ).all()
     return [CategoryCount(name=name or "Uncategorized", count=int(cnt)) for name, cnt in rows]
+
+
+def _top_case_types(db: Session) -> list[CategoryCount]:
+    rows = db.execute(
+        select(DVServiceCase.case_type, func.count(DVServiceCase.id))
+        .where(DVServiceCase.status == "active")
+        .group_by(DVServiceCase.case_type)
+        .order_by(func.count(DVServiceCase.id).desc())
+        .limit(5)
+    ).all()
+    return [CategoryCount(name=name or "unknown", count=int(cnt)) for name, cnt in rows]
+
+
+def _count_high_risk_answers(db: Session) -> int:
+    rows = db.execute(
+        select(ChatMessage.extra_metadata).where(
+            ChatMessage.role == "assistant",
+            ChatMessage.extra_metadata.is_not(None),
+        )
+    ).scalars()
+    count = 0
+    for metadata in rows:
+        if (((metadata or {}).get("agent") or {}).get("risk") or {}).get("risk_level") == "high":
+            count += 1
+    return count
 
 
 def _serialize_sa(answer: StandardAnswer) -> StandardAnswerResponse:
@@ -342,6 +597,64 @@ def _mask_secret(value: str | None) -> str | None:
     return f"{value[:4]}...{value[-4:]}"
 
 
+def _dv_agent_node_response(db: Session, item: dict) -> AgentGraphNodeResponse:
+    call_count = _count(
+        db,
+        AgentStepLog,
+        AgentStepLog.node_key == item["id"],
+    )
+    avg_duration = db.execute(
+        select(func.avg(AgentStepLog.duration_ms)).where(
+            AgentStepLog.node_key == item["id"],
+            AgentStepLog.status == "success",
+        )
+    ).scalar()
+    failure_count = _count(
+        db,
+        AgentStepLog,
+        AgentStepLog.node_key == item["id"],
+        AgentStepLog.status == "failed",
+    )
+    last_failure = db.execute(
+        select(AgentStepLog)
+        .where(
+            AgentStepLog.node_key == item["id"],
+            AgentStepLog.status == "failed",
+        )
+        .order_by(AgentStepLog.started_at.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+    return AgentGraphNodeResponse(
+        id=item["id"],
+        label=item["label"],
+        type=item["type"],
+        description=item.get("description"),
+        input_keys=item.get("input_keys"),
+        output_keys=item.get("output_keys"),
+        enabled=True,
+        call_count=call_count,
+        average_duration_ms=int(avg_duration or 0) if avg_duration is not None else None,
+        failure_count=failure_count,
+        last_failure_message=last_failure.error_message if last_failure else None,
+        last_failure_at=last_failure.started_at if last_failure else None,
+    )
+
+
+def _serialize_agent_run(run: AgentRun) -> AgentRunListItem:
+    return AgentRunListItem(
+        run_id=str(run.id),
+        session_id=str(run.session_id) if run.session_id else None,
+        question=run.question,
+        intent=run.intent,
+        case_type=run.case_type,
+        status=run.status,
+        risk_level=run.risk_level,
+        started_at=run.started_at,
+        finished_at=run.finished_at,
+        duration_ms=run.duration_ms,
+    )
+
+
 def _build_system_config() -> SystemConfigResponse:
     return SystemConfigResponse(
         model_service=ModelServiceConfigResponse(
@@ -386,16 +699,16 @@ def _build_system_config() -> SystemConfigResponse:
         ),
         agent_governance=AgentGovernanceConfigResponse(
             graph_version=DV_GRAPH_VERSION,
-            node_count=2,
-            edge_count=3,
-            orchestration_framework="RAG + LLM (simplified pipeline)",
-            editable_items=["Prompt version", "Mock/HTTP toggle", "Timeout"],
+            node_count=len(DV_AGENT_NODE_DEFINITIONS),
+            edge_count=len(DV_AGENT_EDGE_DEFINITIONS),
+            orchestration_framework="LangGraph multi-agent (digital village)",
+            editable_items=["节点启停", "Prompt 版本", "风险阈值", "兜底策略"],
             runtime_observability=True,
         ),
         edit_mode="runtime_hot_update",
         edit_note=(
-            "Digital village configuration. Hot-update takes effect immediately; "
-            "restart restores from backend/.env DV_* variables."
+            "数字乡村运行时配置。热更新立即生效；"
+            "重启后以 backend/.env DV_* 变量为准。"
         ),
         updated_at=datetime.now(timezone.utc),
     )

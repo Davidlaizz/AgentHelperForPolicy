@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.digital_village.config import dv_settings
 from app.digital_village.services.rag.retriever import dv_hybrid_search
 from app.models import ChatMessage, ChatSession, Citation, HotQuestion, User
+from app.models.agent_graph import AgentRun, AgentStepLog
 from app.schemas.chat import ChatCitationResponse, ChatResponse
 from app.services.rag.metadata_filter import RetrievalFilters
 
@@ -25,20 +26,73 @@ def dv_answer_policy_question(
     policy_category: str | None = None,
     include_expired: bool = False,
 ) -> ChatResponse:
-    """Digital village simplified chat: RAG retrieval + LLM generation."""
+    """Digital village chat: RAG retrieval + LLM generation with agent run tracking."""
+    run_start = datetime.now(timezone.utc)
     chat_session = _dv_get_or_create_session(session, question, session_id, user_id)
     user_message = ChatMessage(session_id=chat_session.id, role="user", content=question)
     session.add(user_message)
     session.flush()
 
+    agent_run = AgentRun(
+        graph_version="v1.0-dv-langgraph",
+        user_id=str(chat_session.user_id),
+        session_id=str(chat_session.id),
+        question=question,
+        status="running",
+        started_at=run_start,
+    )
+    session.add(agent_run)
+    session.flush()
+
+    def _add_step(node_key: str, node_name: str, node_status: str,
+                  input_s: str | None = None, output_s: str | None = None):
+        step_start = datetime.now(timezone.utc)
+        session.add(AgentStepLog(
+            run_id=agent_run.id,
+            node_key=node_key,
+            node_name=node_name,
+            status=node_status,
+            input_summary=input_s,
+            output_summary=output_s,
+            started_at=step_start,
+            finished_at=step_start,
+            duration_ms=0,
+        ))
+
+    # Step 1: Retrieval
     filters = RetrievalFilters(
         policy_category=policy_category,
         include_expired=include_expired,
     )
-    retrieved = dv_hybrid_search(session, question, filters, top_k)
+    try:
+        retrieved = dv_hybrid_search(session, question, filters, top_k)
+        _add_step("retrieval", "RetrievalAgent", "success",
+                  input_s=question[:200], output_s=f"检索到 {len(retrieved)} 个片段")
+    except Exception as exc:
+        _add_step("retrieval", "RetrievalAgent", "failed", input_s=question[:200],
+                  output_s=str(exc))
+        raise
 
+    # Step 2: Evidence
     prompt = _build_dv_prompt(question, retrieved)
-    raw_answer = _dv_call_llm(prompt, retrieved)
+    _add_step("evidence", "EvidenceAgent", "success",
+              input_s=f"{len(retrieved)} 个检索结果", output_s=f"构建上下文 Prompt ({len(prompt)} 字符)")
+
+    # Step 3: Answer generation
+    try:
+        raw_answer = _dv_call_llm(prompt, retrieved)
+        _add_step("answer", "AnswerAgent", "success",
+                  input_s=f"Prompt ({len(prompt)} 字符)", output_s=raw_answer[:300])
+    except Exception as exc:
+        _add_step("answer", "AnswerAgent", "failed",
+                  input_s=f"Prompt ({len(prompt)} 字符)", output_s=str(exc))
+        agent_run.status = "failed"
+        agent_run.finished_at = datetime.now(timezone.utc)
+        agent_run.duration_ms = int((datetime.now(timezone.utc) - run_start).total_seconds() * 1000)
+        agent_run.error_message = str(exc)
+        session.commit()
+        raise
+
     policy_basis, ai_inference = _split_dv_answer(raw_answer)
 
     assistant_message = ChatMessage(
@@ -56,6 +110,15 @@ def dv_answer_policy_question(
 
     citations = _dv_create_citations(session, assistant_message, retrieved)
     _dv_update_hot_question(session, question, policy_category)
+
+    # Step 4: Memory write
+    _add_step("memory_write", "MemoryWriteAgent", "success",
+              input_s=f"answer ({len(raw_answer)} 字符)", output_s=f"写入 {len(citations)} 条引用 + 热门问题")
+
+    agent_run.status = "success"
+    agent_run.finished_at = datetime.now(timezone.utc)
+    agent_run.duration_ms = int((datetime.now(timezone.utc) - run_start).total_seconds() * 1000)
+
     session.commit()
     session.refresh(user_message)
     session.refresh(assistant_message)
