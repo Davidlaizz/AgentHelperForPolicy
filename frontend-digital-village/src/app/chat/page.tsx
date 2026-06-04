@@ -1,265 +1,236 @@
 "use client";
 
-import { FormEvent, useState } from "react";
-import { ArrowRight, FileText, Loader2, Send, ShieldAlert, AlertTriangle } from "lucide-react";
+import { FormEvent, useMemo, useState } from "react";
+import { Bot, FileText, Loader2, MessageSquareText, Send, UserRound } from "lucide-react";
 
-import { PageHeading } from "@/components/page-heading";
 import { SectionCard } from "@/components/section-card";
-import { featuredQuestions, fallbackPolicyAnswer, policyAnswers, type PolicyAnswer } from "@/data/platform-data";
+import { featuredQuestions } from "@/data/platform-data";
 import { askPolicyQuestion, type ChatResponse } from "@/lib/api";
+
+type ChatTurn = {
+  id: string;
+  question: string;
+  response?: ChatResponse;
+  error?: string;
+};
 
 const EXAMPLE_QUESTIONS = featuredQuestions;
 
-interface DisplayAnswer {
-  question: string;
-  conclusion: string;
-  policies: string[];
-  conditions: string[];
-  materials: string[];
-  department: string;
-  risk: string;
-  evidence: Array<{ source: string; quote: string }>;
-  isApiResponse: boolean;
-}
-
-function parseApiAnswer(response: ChatResponse, question: string): DisplayAnswer {
-  const answer = response.answer || "";
-  const basis = response.policy_basis || "";
-  const inference = response.ai_inference || "";
-
-  // Try to extract structured sections from the answer text
-  const extract = (text: string, label: string): string => {
-    const idx = text.indexOf(label);
-    if (idx === -1) return "";
-    const start = idx + label.length;
-    const rest = text.slice(start);
-    const nextLabels = ["简要结论", "适用政策", "可能符合", "需要准备", "办理部门", "咨询渠道", "风险提醒", "风险提示", "政策依据", "AI推断", "注意"];
-    let end = rest.length;
-    for (const nl of nextLabels) {
-      const ni = rest.indexOf(nl);
-      if (ni > 0 && ni < end) end = ni;
-    }
-    return rest.slice(0, end).replace(/^[：:\s]+/, "").trim();
-  };
-
-  const conclusion =
-    extract(answer, "简要结论") ||
-    extract(answer, "结论") ||
-    (basis ? basis.slice(0, 300) : answer.slice(0, 300));
-
-  const policiesRaw = extract(answer, "适用政策") || extract(answer, "相关政策");
-  const conditionsRaw = extract(answer, "可能符合的条件") || extract(answer, "适用条件");
-  const materialsRaw = extract(answer, "需要准备的材料") || extract(answer, "材料清单");
-  const department = extract(answer, "办理部门") || extract(answer, "咨询渠道") || "请咨询当地主管部门";
-  const risk = extract(answer, "风险提醒") || extract(answer, "风险提示") || "政策执行存在地区差异";
-
-  const split = (raw: string): string[] => {
-    if (!raw) return [];
-    return raw.split(/[、,，\n]+/).map((s) => s.replace(/^[\d]+[.、]?\s*/, "").trim()).filter(Boolean);
-  };
-
-  const citations: Array<{ source: string; quote: string }> = response.citations?.length
-    ? response.citations.map((c) => ({ source: c.document_title, quote: c.quote_text.slice(0, 300) }))
-    : [{ source: "数字乡村政策知识库", quote: inference.slice(0, 200) || answer.slice(0, 200) }];
-
-  return {
-    question,
-    conclusion: conclusion || "请查看完整回答",
-    policies: split(policiesRaw).length ? split(policiesRaw) : ["参见完整回答"],
-    conditions: split(conditionsRaw).length ? split(conditionsRaw) : ["参见完整回答"],
-    materials: split(materialsRaw).length ? split(materialsRaw) : ["参见完整回答"],
-    department,
-    risk,
-    evidence: citations,
-    isApiResponse: true,
-  };
-}
-
-function findStaticAnswer(question: string): PolicyAnswer {
-  return policyAnswers.find((a) => a.question === question.trim()) ?? fallbackPolicyAnswer;
-}
-
 export default function ChatPage() {
-  const [input, setInput] = useState(EXAMPLE_QUESTIONS[0]);
+  const [question, setQuestion] = useState("");
+  const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [loading, setLoading] = useState(false);
-  const [apiError, setApiError] = useState(false);
-  const [apiResult, setApiResult] = useState<DisplayAnswer | null>(null);
 
-  const staticAnswer = findStaticAnswer(input);
+  const canSubmit = useMemo(() => question.trim().length > 0 && !loading, [question, loading]);
 
-  function chooseQuestion(question: string) {
-    setInput(question);
-    setApiResult(null);
-    setApiError(false);
-  }
+  async function ask(nextQuestion: string) {
+    const trimmed = nextQuestion.trim();
+    if (!trimmed) return;
 
-  async function submitQuestion(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+    const turnId = crypto.randomUUID();
+    setTurns((prev) => [...prev, { id: turnId, question: trimmed }]);
+    setQuestion("");
     setLoading(true);
-    setApiError(false);
-    setApiResult(null);
-
-    const question = input.trim();
 
     try {
-      const response = await askPolicyQuestion({ question, top_k: 5 });
-      setApiResult(parseApiAnswer(response, question));
-    } catch {
-      setApiError(true);
+      const response = await askPolicyQuestion({ question: trimmed, top_k: 5 });
+      setTurns((prev) =>
+        prev.map((t) => (t.id === turnId ? { ...t, response } : t)),
+      );
+    } catch (error) {
+      setTurns((prev) =>
+        prev.map((t) =>
+          t.id === turnId
+            ? { ...t, error: error instanceof Error ? error.message : "问答请求失败" }
+            : t,
+        ),
+      );
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }
 
-  const displayed = apiResult ?? staticAnswer;
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (canSubmit) void ask(question);
+  }
 
   return (
     <div className="page-shell">
-      <PageHeading
-        eyebrow="Policy Q&A"
-        title="政策问答"
-        description="面向涉农政策咨询，系统展示结论、适用条件、材料、办理部门和政策依据。"
-      />
-
-      <div className="grid gap-6 lg:grid-cols-[0.75fr_1.25fr]">
-        <SectionCard title="示例问题" description="点击问题可直接生成一份可信回答。">
-          <div className="grid gap-3">
-            {EXAMPLE_QUESTIONS.map((question) => (
-              <button
-                key={question}
-                type="button"
-                onClick={() => chooseQuestion(question)}
-                className={`focus-ring flex min-h-12 items-center justify-between gap-3 rounded-md border px-3 text-left text-sm transition-colors ${
-                  input === question
-                    ? "border-[var(--primary)] bg-emerald-50 text-emerald-900"
-                    : "border-[var(--border)] bg-white hover:bg-[var(--muted)]"
-                }`}
-              >
-                <span>{question}</span>
-                <ArrowRight className="size-4 shrink-0" aria-hidden="true" />
-              </button>
-            ))}
-          </div>
-        </SectionCard>
-
-        <div className="space-y-6">
-          <SectionCard title="咨询输入" description="输入政策问题后，系统会按统一结构整理答复和依据。">
-            <form onSubmit={submitQuestion} className="grid gap-3 md:grid-cols-[1fr_auto]">
-              <label className="sr-only" htmlFor="policy-question">政策咨询问题</label>
-              <input
-                id="policy-question"
-                value={input}
-                onChange={(event) => setInput(event.target.value)}
-                className="focus-ring min-h-12 rounded-md border border-[var(--border)] bg-white px-3 text-sm text-[var(--foreground)]"
-                placeholder="请输入你的政策问题"
-              />
-              <button type="submit" disabled={loading}
-                className="focus-ring inline-flex min-h-12 items-center justify-center gap-2 rounded-md bg-[var(--primary)] px-5 text-sm font-medium text-white disabled:opacity-70">
-                {loading ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
-                发送
-              </button>
-            </form>
+      <div className="grid gap-6 lg:grid-cols-[280px_1fr]">
+        {/* 左侧边栏 */}
+        <aside className="space-y-4">
+          <SectionCard title="会话脉络" description="保留本轮咨询问题，便于演示连续追问。">
+            <div className="space-y-2">
+              {turns.length === 0 ? (
+                <p className="text-sm text-[var(--muted-foreground)]">还没有开始咨询。</p>
+              ) : (
+                turns.map((turn, index) => (
+                  <div key={turn.id} className="rounded-md border border-[var(--border)] bg-white p-3">
+                    <div className="mb-1 flex items-center gap-1.5 text-xs text-[var(--muted-foreground)]">
+                      <MessageSquareText className="size-3.5" />
+                      <span>第 {index + 1} 轮</span>
+                    </div>
+                    <p className="line-clamp-3 text-sm text-[var(--foreground)]">{turn.question}</p>
+                  </div>
+                ))
+              )}
+            </div>
           </SectionCard>
 
-          {loading && (
-            <div className="surface flex flex-col items-center justify-center gap-3 py-16">
-              <Loader2 className="size-8 animate-spin text-[var(--primary)]" />
-              <p className="text-sm text-[var(--muted-foreground)]">智能体正在检索政策并生成回答...</p>
+          <SectionCard title="常见问题" description="点击问题开始咨询。">
+            <div className="space-y-2">
+              {EXAMPLE_QUESTIONS.map((item) => (
+                <button
+                  key={item}
+                  type="button"
+                  disabled={loading}
+                  onClick={() => ask(item)}
+                  className="focus-ring w-full rounded-md border border-[var(--border)] bg-white px-3 py-2 text-left text-sm transition-colors hover:bg-[var(--muted)] disabled:opacity-50"
+                >
+                  {item}
+                </button>
+              ))}
             </div>
-          )}
+          </SectionCard>
+        </aside>
 
-          {apiError && (
-            <div className="rounded-md border border-amber-200 bg-amber-50 p-4">
-              <div className="flex items-start gap-3">
-                <AlertTriangle className="mt-0.5 size-5 shrink-0 text-amber-800" />
-                <div>
-                  <p className="text-sm font-semibold text-amber-950">后端暂不可达</p>
-                  <p className="mt-1 text-sm text-amber-900">当前展示为本地示例数据，API 连通后自动切换为实时回答。</p>
+        {/* 右侧主体 */}
+        <main className="flex min-w-0 flex-col gap-6">
+          <SectionCard
+            title="智能问答"
+            description="基于政策知识库回答问题，展示政策依据、AI 推断和引用出处。"
+          >
+            <p className="text-sm text-[var(--muted-foreground)]">
+              适合自由问政策，也适合进入多轮资格判断。回答会带出处和风险提示。
+            </p>
+          </SectionCard>
+
+          <section className="flex min-h-[520px] flex-col rounded-md border border-[var(--border)] bg-white">
+            <div className="flex-1 space-y-5 overflow-y-auto p-5">
+              {turns.length === 0 ? (
+                <div className="flex h-full min-h-[360px] items-center justify-center rounded-md border border-dashed border-[var(--border)] text-sm text-[var(--muted-foreground)]">
+                  选择一个示例问题，或输入你想咨询的政策事项。
                 </div>
-              </div>
-            </div>
-          )}
-
-          {!loading && (
-            <section className="surface p-5 md:p-6">
-              <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[var(--border)] pb-4">
-                <div>
-                  <p className="text-sm font-semibold text-[var(--secondary)]">
-                    {apiResult?.isApiResponse ? "智能回答 (实时)" : "示例回答"}
-                  </p>
-                  <h2 className="mt-2 text-xl font-semibold text-[var(--foreground)]">
-                    {"isApiResponse" in displayed && (displayed as DisplayAnswer).isApiResponse
-                      ? displayed.question
-                      : (displayed as PolicyAnswer).question}
-                  </h2>
-                </div>
-                <span className="inline-flex min-h-9 items-center rounded-md bg-amber-50 px-3 text-sm font-medium text-amber-900">
-                  政策咨询
-                </span>
-              </div>
-
-              <div className="mt-5 grid gap-4">
-                <div className="rounded-md bg-emerald-50 p-4">
-                  <p className="text-sm font-semibold text-emerald-900">简要结论</p>
-                  <p className="mt-2 text-sm leading-6 text-emerald-950">{displayed.conclusion}</p>
-                </div>
-
-                <div className="grid gap-4 md:grid-cols-2">
-                  <InfoList title="适用政策" items={displayed.policies} />
-                  <InfoList title="你可能符合的条件" items={displayed.conditions} />
-                  <InfoList title="需要准备的材料" items={displayed.materials} />
-                  <div className="rounded-md border border-[var(--border)] bg-white p-4">
-                    <p className="text-sm font-semibold text-[var(--foreground)]">办理部门或咨询渠道</p>
-                    <p className="mt-3 text-sm leading-6 text-[var(--muted-foreground)]">{displayed.department}</p>
-                  </div>
-                </div>
-
-                <div className="rounded-md border border-amber-200 bg-amber-50 p-4">
-                  <div className="flex items-start gap-3">
-                    <ShieldAlert className="mt-0.5 size-5 shrink-0 text-amber-800" aria-hidden="true" />
-                    <div>
-                      <p className="text-sm font-semibold text-amber-950">风险提醒</p>
-                      <p className="mt-2 text-sm leading-6 text-amber-950">{displayed.risk}</p>
-                    </div>
-                  </div>
-                </div>
-
-                {"evidence" in displayed && displayed.evidence && displayed.evidence.length > 0 && (
-                  <div className="rounded-md border border-[var(--border)] bg-white p-4">
-                    <div className="flex items-center gap-2">
-                      <FileText className="size-5 text-[var(--secondary)]" aria-hidden="true" />
-                      <p className="text-sm font-semibold text-[var(--foreground)]">政策依据</p>
-                    </div>
-                    <div className="mt-3 grid gap-3">
-                      {displayed.evidence.map((item, i) => (
-                        <div key={i} className="rounded-md bg-[var(--muted)] p-3 text-sm leading-6">
-                          <p className="font-medium text-[var(--foreground)]">{item.source}</p>
-                          <p className="mt-1 text-[var(--muted-foreground)]">{item.quote}</p>
+              ) : (
+                turns.map((turn) => (
+                  <div key={turn.id} className="space-y-3">
+                    {/* 用户消息 */}
+                    <div className="flex justify-end">
+                      <div className="max-w-[78%] rounded-md bg-[var(--primary)] px-4 py-3 text-sm text-white">
+                        <div className="mb-1 flex items-center justify-end gap-1.5 text-xs opacity-80">
+                          <UserRound className="size-3.5" />
+                          <span>用户</span>
                         </div>
-                      ))}
+                        {turn.question}
+                      </div>
+                    </div>
+
+                    {/* AI 回答 */}
+                    <div className="flex justify-start">
+                      <div className="max-w-[86%] rounded-md border border-[var(--border)] bg-white px-4 py-3 text-sm">
+                        <div className="mb-3 flex items-center gap-1.5 text-xs text-[var(--muted-foreground)]">
+                          <Bot className="size-3.5" />
+                          <span>数字乡村智能体</span>
+                        </div>
+
+                        {turn.response ? (
+                          <AnswerContent response={turn.response} />
+                        ) : turn.error ? (
+                          <p className="text-[var(--danger)]">{turn.error}</p>
+                        ) : (
+                          <div className="flex items-center gap-2 text-[var(--muted-foreground)]">
+                            <Loader2 className="size-4 animate-spin" />
+                            <span>正在检索政策并生成回答</span>
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </div>
-                )}
+                ))
+              )}
+            </div>
+
+            {/* 底部输入栏 */}
+            <form onSubmit={handleSubmit} className="border-t border-[var(--border)] p-4">
+              <div className="flex gap-3">
+                <input
+                  value={question}
+                  onChange={(e) => setQuestion(e.target.value)}
+                  placeholder="请输入政策问题，例如：农机补贴怎么申请？"
+                  className="focus-ring h-10 flex-1 rounded-md border border-[var(--border)] bg-white px-3 text-sm outline-none"
+                />
+                <button
+                  type="submit"
+                  disabled={!canSubmit}
+                  className="focus-ring inline-flex items-center gap-1.5 rounded-md bg-[var(--primary)] px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+                >
+                  {loading ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
+                  发送
+                </button>
               </div>
-            </section>
-          )}
-        </div>
+            </form>
+          </section>
+        </main>
       </div>
     </div>
   );
 }
 
-function InfoList({ title, items }: { title: string; items: string[] }) {
+function AnswerContent({ response }: { response: ChatResponse }) {
+  const { answer, policy_basis, ai_inference, citations } = response;
+
+  const hasAiInference = ai_inference && ai_inference.trim();
+
   return (
-    <div className="rounded-md border border-[var(--border)] bg-white p-4">
-      <p className="text-sm font-semibold text-[var(--foreground)]">{title}</p>
-      <ul className="mt-3 space-y-2 text-sm leading-6 text-[var(--muted-foreground)]">
-        {items.map((item) => (
-          <li key={item} className="flex gap-2">
-            <span className="mt-2 size-1.5 shrink-0 rounded-full bg-[var(--primary)]" />
-            <span>{item}</span>
-          </li>
-        ))}
-      </ul>
+    <div className="space-y-4">
+      <div className={hasAiInference ? "grid gap-3" : undefined}>
+        <div className="rounded-md border border-[var(--border)] bg-[var(--muted)] p-4">
+          <h3 className="mb-2 text-sm font-semibold text-[var(--foreground)]">政策依据</h3>
+          <p className="whitespace-pre-wrap text-sm leading-6 text-[var(--foreground)]">
+            {policy_basis || answer || "暂无政策依据。"}
+          </p>
+        </div>
+        {hasAiInference ? (
+          <div className="rounded-md border border-[var(--border)] bg-blue-50 p-4">
+            <h3 className="mb-2 text-sm font-semibold text-[var(--foreground)]">AI 推断</h3>
+            <p className="whitespace-pre-wrap text-sm leading-6 text-[var(--foreground)]">
+              {ai_inference}
+            </p>
+          </div>
+        ) : null}
+      </div>
+
+      {citations && citations.length > 0 ? (
+        <div className="space-y-2">
+          <h3 className="text-sm font-semibold text-[var(--foreground)]">引用出处</h3>
+          <div className="grid gap-2">
+            {citations.map((citation) => (
+              <details
+                key={citation.citation_id}
+                className="rounded-md border border-[var(--border)] bg-white p-3"
+              >
+                <summary className="flex cursor-pointer list-none items-start gap-2 text-sm">
+                  <FileText className="mt-0.5 size-4 shrink-0 text-[var(--muted-foreground)]" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate font-medium text-[var(--foreground)]">
+                      {citation.document_title}
+                    </span>
+                    <span className="text-xs text-[var(--muted-foreground)]">
+                      {citation.page_no ? `第 ${citation.page_no} 页` : "无页码"}
+                      {citation.article_no ? ` · ${citation.article_no}` : ""}
+                      {` · 分数 ${citation.final_score.toFixed(3)}`}
+                    </span>
+                  </span>
+                </summary>
+                <p className="mt-3 whitespace-pre-wrap text-xs leading-5 text-[var(--muted-foreground)]">
+                  {citation.quote_text}
+                </p>
+              </details>
+            ))}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
