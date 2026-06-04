@@ -9,10 +9,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 **Current version**: V1.1 LangGraph multi-Agent (12 nodes), M0–M8 milestones completed.
 
 **Two parallel scenarios** currently in the repo:
-| Scenario | Frontend | Port | Backend Prefix | Status |
-|----------|----------|------|----------------|--------|
-| 高校政策 | `frontend/` | 3000 | `/api/*` | V1.1 LangGraph 完整闭环 |
-| 数字乡村 | `frontend-digital-village/` | 3001 | `/api/digital-village/*` (规划中) | 前端完成，后端隔离骨架待建 |
+| Scenario | Frontend | Port | Backend Prefix | Model | Status |
+|----------|----------|------|----------------|-------|--------|
+| 高校政策 | `frontend/` | 3000 | `/api/*` | gpt-5.3-codex (local) | V1.1 LangGraph 完整闭环 |
+| 数字乡村 | `frontend-digital-village/` | 3001 | `/api/digital-village/*` | sensenova-6.7-flash-lite | Phase 0-4 完整（后端骨架+文档RAG+Chat+管理后台+前端对接） |
 
 **项目定位**: 面向创新作品大赛和可运行 Demo 的应用型项目，重点展示"政策服务 + RAG + 多 Agent + 可观测治理"的完整闭环。
 
@@ -26,7 +26,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | RAG | LlamaIndex + pgvector |
 | Agent | LangGraph (1.0.8) + LangChain Core (1.2.17) |
 | Document Parsing | PyMuPDF + python-docx |
-| Model Service | OpenAI-compatible HTTP Provider (SiliconFlow / Zhipu GLM) |
+| Model Service | OpenAI-compatible HTTP Provider (sensenova / SiliconFlow / Zhipu GLM / Codex) |
 
 ## Architecture
 
@@ -75,6 +75,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | `services/llm_provider.py` | Model switching (SiliconFlow / Zhipu / mock) |
 | `prompts/` | System prompts (e.g., `policy_qa.md`) |
 | `storage/` | `uploads/`, `parsed/` |
+
+### 数字乡村后端 (`backend/app/digital_village/`)
+
+| Directory | Purpose |
+|-----------|---------|
+| `config.py` | `DigitalVillageSettings` (独立 DV_* 配置) |
+| `db/` | 独立 DB session + dependencies + init_db |
+| `api/routes/` | 10 条路由: health/documents/rag/chat/management |
+| `services/chat_service.py` | Chat 问答（RAG + LLM 直接调用） |
+| `services/document_service.py` | 文档解析到独立存储目录 |
+| `services/rag/` | 独立 LlamaIndex PGVectorStore 适配器 |
+| `schemas/` | 复用高校 Pydantic schema |
 
 ### Frontend Structure (`frontend/src/`)
 
@@ -207,6 +219,25 @@ See `frontend/.env.example`.
 | GET | `/api/management/hot-questions` | Hot questions |
 | GET/POST | `/api/management/standard-answers` | Standard answers |
 | GET | `/api/management/policy-chunks` | Clause verification |
+
+### 数字乡村 API (`/api/digital-village/*`)
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/health` | Health check (独立数据库) |
+| GET/POST | `/documents` | List/upload policy docs |
+| POST | `/documents/{id}/parse` | Re-parse document |
+| PATCH/DELETE | `/documents/{id}` | Update/disable document |
+| POST | `/rag/index/rebuild` | Rebuild RAG index |
+| POST | `/rag/index/documents/{id}` | Index single document |
+| GET/POST | `/rag/search` | Semantic search (独立向量表) |
+| POST | `/chat` | Policy Q&A (sensenova model) |
+| GET | `/management/dashboard` | Admin dashboard |
+| GET | `/management/hot-questions` | Hot questions |
+| GET/POST/PATCH/DELETE | `/management/standard-answers` | Standard answers CRUD |
+| GET | `/management/policy-chunks` | Clause verification |
+| GET | `/management/agent-graph` | Agent 编排图 |
+| GET/PATCH | `/management/system-config` | 系统配置 + 运行时热更新 |
 
 ## Git Workflow
 
