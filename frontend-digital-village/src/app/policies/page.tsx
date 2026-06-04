@@ -1,108 +1,239 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { BookOpenCheck, Filter, Loader2, Search } from "lucide-react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FileSearch, Loader2, RefreshCw, Search } from "lucide-react";
 
-import { PageHeading } from "@/components/page-heading";
 import { SectionCard } from "@/components/section-card";
-import { policyDocuments } from "@/data/platform-data";
-import { listDocuments, type PolicyDocumentItem } from "@/lib/api";
-
-const categories = ["全部", "数字乡村建设", "乡村振兴", "农业补贴", "农产品电商", "返乡创业", "社区治理"];
+import { PageHeading } from "@/components/page-heading";
+import {
+  getPolicyChunks,
+  listDocuments,
+  type PolicyDocumentItem,
+  type PolicyChunkItem,
+  type PolicyChunkListResponse,
+} from "@/lib/api";
 
 export default function PoliciesPage() {
-  const [apiDocs, setApiDocs] = useState<PolicyDocumentItem[] | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [documents, setDocuments] = useState<PolicyDocumentItem[]>([]);
+  const [selectedDocumentId, setSelectedDocumentId] = useState("");
+  const [query, setQuery] = useState("");
+  const [chunks, setChunks] = useState<PolicyChunkListResponse | null>(null);
+  const [message, setMessage] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [initLoading, setInitLoading] = useState(true);
+
+  const selectedDocument = useMemo(
+    () => documents.find((document) => document.id === selectedDocumentId),
+    [documents, selectedDocumentId],
+  );
+
+  async function loadChunks(documentId = selectedDocumentId, nextQuery = query) {
+    setLoading(true);
+    setMessage("");
+    try {
+      const payload = await getPolicyChunks({
+        document_id: documentId || undefined,
+        query: nextQuery.trim() || undefined,
+        limit: 30,
+        offset: 0,
+      });
+      setChunks(payload);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "条款加载失败");
+    } finally {
+      setLoading(false);
+    }
+  }
 
   useEffect(() => {
-    listDocuments()
-      .then((docs) => setApiDocs(docs.filter((d) => d.is_active)))
-      .catch(() => setApiDocs(null))
-      .finally(() => setLoading(false));
+    let cancelled = false;
+
+    async function loadInitial() {
+      try {
+        const docs = await listDocuments();
+        const activeDocuments = docs.filter((d) => d.is_active);
+        if (cancelled) return;
+
+        setDocuments(activeDocuments);
+        const firstDocumentId = activeDocuments[0]?.id ?? "";
+        setSelectedDocumentId(firstDocumentId);
+
+        if (firstDocumentId) {
+          const chunkPayload = await getPolicyChunks({
+            document_id: firstDocumentId,
+            limit: 30,
+            offset: 0,
+          });
+          if (!cancelled) setChunks(chunkPayload);
+        }
+      } catch (error) {
+        if (!cancelled) setMessage(error instanceof Error ? error.message : "政策文件加载失败");
+      } finally {
+        if (!cancelled) setInitLoading(false);
+      }
+    }
+
+    void loadInitial();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  const hasApi = apiDocs !== null;
-  const docs = apiDocs ?? policyDocuments;
+  function handleSearch(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    void loadChunks();
+  }
 
   return (
     <div className="page-shell">
-      <PageHeading eyebrow="Policy Library" title="政策库"
-        description="按政策分类、地区层级、适用主体组织资料和引用片段。" />
-      <div className="grid gap-6 lg:grid-cols-[0.78fr_1.22fr]">
-        <SectionCard title="筛选条件" description="按关键词和政策分类快速定位资料。">
-          <div className="space-y-5">
-            <div>
-              <label className="text-sm font-semibold" htmlFor="policy-search">搜索关键词</label>
-              <div className="mt-2 flex min-h-12 items-center gap-2 rounded-md border bg-white px-3">
-                <Search className="size-4 text-muted-foreground" />
-                <input id="policy-search" className="min-w-0 flex-1 bg-transparent text-sm outline-none"
-                  placeholder="补贴、创业、直播、电商" />
+      <PageHeading
+        eyebrow="Policy Library"
+        title="政策库"
+        description="查看政策文件与知识库切片，按关键词搜索条款正文、章节或条款号。"
+      />
+
+      {initLoading ? (
+        <div className="flex items-center justify-center py-16">
+          <Loader2 className="size-8 animate-spin text-[var(--primary)]" />
+        </div>
+      ) : (
+        <div className="grid gap-5 lg:grid-cols-[320px_1fr]">
+          {/* 左侧：政策文件列表 */}
+          <aside>
+            <SectionCard title="政策文件" description="选择文件查看切片">
+              <div className="max-h-[540px] overflow-y-auto -mx-5 -mb-5">
+                {documents.map((doc) => (
+                  <button
+                    key={doc.id}
+                    type="button"
+                    onClick={() => {
+                      setSelectedDocumentId(doc.id);
+                      void loadChunks(doc.id, query);
+                    }}
+                    className="block w-full border-b border-[var(--border)] px-5 py-3 text-left text-sm transition-colors last:border-0"
+                    style={{
+                      backgroundColor:
+                        selectedDocumentId === doc.id ? "var(--muted)" : "transparent",
+                    }}
+                  >
+                    <span className="block truncate font-semibold text-[var(--foreground)]">
+                      {doc.title}
+                    </span>
+                    <span className="mt-1 block truncate text-xs text-[var(--muted-foreground)]">
+                      {doc.policy_category} · {doc.chunk_count} 个切片 · {doc.is_active ? "启用" : "禁用"}
+                    </span>
+                  </button>
+                ))}
+                {documents.length === 0 ? (
+                  <p className="px-5 py-10 text-center text-sm text-[var(--muted-foreground)]">
+                    暂无政策文件
+                  </p>
+                ) : null}
               </div>
-            </div>
-            <FilterGroup title="政策分类" items={categories} />
-          </div>
-        </SectionCard>
-        <SectionCard title="政策文件列表"
-          description={hasApi ? "来自后端实时数据" : "本地示例数据（后端暂不可达）"}>
-          {loading ? (
-            <div className="flex items-center justify-center py-12">
-              <Loader2 className="size-8 animate-spin text-[var(--primary)]" />
-            </div>
-          ) : (
-            <div className="grid gap-4">
-              {apiDocs ? (
-                apiDocs.map((doc) => (
-                  <article key={doc.id} className="rounded-md border bg-white p-4">
-                    <div className="flex items-center gap-2">
-                      <BookOpenCheck className="size-5 text-[var(--primary)]" />
-                      <h2 className="text-lg font-semibold">{doc.title}</h2>
-                    </div>
-                    <p className="mt-2 text-sm text-muted-foreground">
-                      分类：{doc.policy_category} | 层级：{doc.policy_level} | 状态：{doc.parse_status}
-                    </p>
-                    <div className="mt-4 rounded-md bg-[var(--muted)] p-3 text-sm">
-                      <p>文件：{doc.file_name} | 切片：{doc.chunk_count}</p>
-                    </div>
-                  </article>
-                ))
-              ) : (
-                policyDocuments.map((doc) => (
-                  <article key={doc.title} className="rounded-md border bg-white p-4">
-                    <div className="flex items-center gap-2">
-                      <BookOpenCheck className="size-5 text-[var(--primary)]" />
-                      <h2 className="text-lg font-semibold">{doc.title}</h2>
-                    </div>
-                    <p className="mt-2 text-sm text-muted-foreground">{doc.summary}</p>
-                    <div className="mt-4 rounded-md bg-[var(--muted)] p-3 text-sm">
-                      <p className="font-medium">适用主体：{doc.subject}</p>
-                      <p className="mt-1">{doc.snippet}</p>
-                    </div>
-                  </article>
-                ))
-              )}
-            </div>
-          )}
-        </SectionCard>
-      </div>
+            </SectionCard>
+          </aside>
+
+          {/* 右侧：切片详情 */}
+          <section className="min-w-0">
+            <SectionCard
+              title={selectedDocument?.title ?? "请选择政策文件"}
+              description={
+                selectedDocument
+                  ? `${selectedDocument.policy_level} · ${selectedDocument.policy_category} · ${selectedDocument.file_name}`
+                  : "左侧选择文件后可查看切片"
+              }
+              action={
+                <button
+                  type="button"
+                  disabled={loading}
+                  onClick={() => loadChunks()}
+                  className="inline-flex items-center gap-1.5 rounded-md border border-[var(--border)] bg-white px-3 py-1.5 text-sm text-[var(--foreground)] transition-colors hover:bg-[var(--muted)] disabled:opacity-50"
+                >
+                  <RefreshCw className="size-4" />
+                  刷新
+                </button>
+              }
+            >
+              <form onSubmit={handleSearch} className="mb-5 flex gap-3">
+                <div className="relative flex-1">
+                  <Search className="pointer-events-none absolute left-3 top-2.5 size-4 text-[var(--muted-foreground)]" />
+                  <input
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    placeholder="搜索条款正文、章节或条款号"
+                    className="h-10 w-full rounded-md border border-[var(--border)] bg-white pl-9 pr-3 text-sm outline-none focus:ring-3 focus:ring-[var(--ring)]/40"
+                  />
+                </div>
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="focus-ring inline-flex items-center gap-1.5 rounded-md bg-[var(--primary)] px-4 py-2 text-sm font-medium text-white transition-colors hover:brightness-110 disabled:opacity-50"
+                >
+                  <FileSearch className="size-4" />
+                  检索
+                </button>
+              </form>
+
+              {message ? (
+                <p className="mb-4 text-sm text-[var(--muted-foreground)]">{message}</p>
+              ) : null}
+
+              <p className="mb-3 text-sm text-[var(--muted-foreground)]">
+                共 {chunks?.total ?? 0} 个切片，当前展示 {chunks?.results.length ?? 0} 个
+              </p>
+
+              <div className="space-y-3">
+                {chunks?.results.map((chunk) => (
+                  <ChunkCard key={chunk.chunk_id} chunk={chunk} />
+                ))}
+                {chunks && chunks.results.length === 0 ? (
+                  <div className="rounded-md border border-dashed border-[var(--border)] bg-white p-8 text-center text-sm text-[var(--muted-foreground)]">
+                    未找到匹配切片
+                  </div>
+                ) : null}
+              </div>
+            </SectionCard>
+          </section>
+        </div>
+      )}
     </div>
   );
 }
 
-function FilterGroup({ title, items }: { title: string; items: string[] }) {
+function ChunkCard({ chunk }: { chunk: PolicyChunkItem }) {
   return (
-    <div>
-      <div className="mb-2 flex items-center gap-2">
-        <Filter className="size-4 text-[var(--secondary)]" />
-        <p className="text-sm font-semibold">{title}</p>
+    <article className="rounded-md border border-[var(--border)] bg-white p-4">
+      <div className="mb-2 flex flex-wrap items-center gap-1.5 text-xs">
+        <span className="rounded bg-[var(--muted)] px-2 py-0.5 text-[var(--muted-foreground)]">
+          #{chunk.chunk_index}
+        </span>
+        {chunk.policy_category ? (
+          <span className="rounded bg-[var(--muted)] px-2 py-0.5 text-[var(--muted-foreground)]">
+            {chunk.policy_category}
+          </span>
+        ) : null}
+        {chunk.page_no ? (
+          <span className="rounded bg-[var(--muted)] px-2 py-0.5 text-[var(--muted-foreground)]">
+            第 {chunk.page_no} 页
+          </span>
+        ) : null}
+        {chunk.article_no ? (
+          <span className="rounded bg-[var(--muted)] px-2 py-0.5 text-[var(--muted-foreground)]">
+            {chunk.article_no}
+          </span>
+        ) : null}
       </div>
-      <div className="flex flex-wrap gap-2">
-        {items.map((item, index) => (
-          <button key={item} type="button"
-            className={"min-h-10 rounded-md px-3 text-sm " + (index === 0 ? "bg-[var(--primary)] text-white" : "bg-[var(--muted)]")}>
-            {item}
-          </button>
-        ))}
-      </div>
-    </div>
+      {chunk.section_title ? (
+        <h3 className="mb-2 text-sm font-semibold text-[var(--foreground)]">
+          {chunk.section_title}
+        </h3>
+      ) : null}
+      <p className="whitespace-pre-wrap text-sm leading-6 text-[var(--foreground)]">
+        {chunk.chunk_text}
+      </p>
+      <p className="mt-3 text-xs text-[var(--muted-foreground)]">
+        来源：{chunk.document_title} · {chunk.file_name}
+      </p>
+    </article>
   );
 }
