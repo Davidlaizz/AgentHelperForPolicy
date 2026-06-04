@@ -194,7 +194,7 @@ export default function ChatPage() {
           </div>
         </SectionCard>
 
-        <SectionCard title="演示脚本" description="点击问题即可开始稳定链路。">
+        <SectionCard title="常见问题" description="点击问题即可开始稳定链路。">
           <div className="space-y-2">
             {starterQuestions.map((item) => (
               <Button
