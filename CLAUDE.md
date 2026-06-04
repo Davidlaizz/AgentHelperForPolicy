@@ -123,7 +123,8 @@ python run.py          # uvicorn with reload, port 8000
 
 # Database init & seed
 python app/db/init_db.py
-python app/db/seed_m0_documents.py   # M0 policy documents
+python app/db/seed_m0_documents.py   # M0 高校政策资料
+python app/db/seed_dv_documents.py   # M0 数字乡村政策资料 (7份文档，30切片)
 
 # Smoke tests
 python app/db/m2_smoke_test.py   # model validation
@@ -260,8 +261,11 @@ See `frontend/.env.example`.
 - **Frontend**: Production build (`npm run build`) recommended over dev mode to avoid Turbopack hydration issues.
 - **Remote DB**: PostgreSQL at `192.168.216.101:5432`, database `zhicetong`, vector extension enabled.
 - **Agent graph**: Core logic in `backend/app/services/agent_graph/agents.py` (12 node functions) and `graph.py` (state machine wiring).
-- **数字乡村隔离**: 高校场景使用 `frontend/` + `/api/*`，数字乡村使用 `frontend-digital-village/` + `/api/digital-village/*` + 独立数据库 `zhicetong_digital_village` + 独立存储目录。后端共享 FastAPI 进程。
-- **模型服务**: SiliconFlow `Pro/deepseek-ai/DeepSeek-V3.2` 与智谱 `glm-4.7` 已验证连通性。当前 `backend/.env` 配置为智谱 GLM，关闭 Thinking 以降低 RAG 问答延迟。
+- **数字乡村隔离**: 高校场景使用 `frontend/` + `/api/*`，数字乡村使用 `frontend-digital-village/` + `/api/digital-village/*` + 独立数据库 `zhicetong_digital_village` + 独立向量表 `llamaindex_digital_village_policy_chunks` + 独立存储目录。后端共享 FastAPI 进程。
+- **数字乡村政策库**: 已入库 7 份数字乡村政策文档（数字乡村建设/乡村振兴/农业补贴/返乡创业/农产品电商/创业扶持/村集体经济），共 30 个切片。
+- **高校模型**: `gpt-5.3-codex`（本地 Codex 代理），用于 12 节点 Agent 的意图/槽位/答案生成
+- **数字乡村模型**: `sensenova-6.7-flash-lite`（sensenova 云 API），用于 chat 问答
+- **Embedding**: 两场景均使用 Mock 哈希伪嵌入（1024维），RAG 混合检索中关键词搜索权重与向量搜索相同
 
 ## Documentation Navigation
 
@@ -272,6 +276,7 @@ See `frontend/.env.example`.
 ### 优先阅读顺序
 
 1. [目录.md](目录.md) — 当前状态、关键入口、下一步
-2. [智策通_项目总方案.md](docs/智策通_项目总方案.md)
-3. [智策通_LangGraph多Agent升级需求与开发规划.md](docs/智策通_LangGraph多Agent升级需求与开发规划.md)
-4. [digital-village-agent-platform-plan.md](docs/digital-village-agent-platform-plan.md) — 数字乡村规划
+2. [digital-village-backend-plan.md](docs/digital-village-backend-plan.md) — 数字乡村后端实施规划
+3. [digital-village-agent-platform-plan.md](docs/digital-village-agent-platform-plan.md) — 数字乡村场景总规划
+4. [智策通_项目总方案.md](docs/智策通_项目总方案.md)
+5. [智策通_LangGraph多Agent升级需求与开发规划.md](docs/智策通_LangGraph多Agent升级需求与开发规划.md)
